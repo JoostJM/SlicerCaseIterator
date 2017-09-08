@@ -42,6 +42,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.logger = logging.getLogger('slicerBatch')
 
     # Variables to hold current case and all cases to process
+    self.csv_dir = None
     self.cases = None
     self.currentCase = None
 
@@ -167,6 +168,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       settings['mask'] = self.maskSelector.text
       settings['addIms'] = str(self.addImsSelector.text).split(',')
       settings['addMas'] = str(self.addMasksSelector.text).split(',')
+      settings['csv_dir'] = self.csv_dir
 
       self.currentCase = SlicerBatchLogic(newCase, **settings)
 
@@ -191,8 +193,9 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
         csv_reader = csv.DictReader(open_csv_file)
         for row in csv_reader:
           cases.append(row)
-        self._setGUIstate()
-        self.logger.info('file loaded, %d cases' % len(cases))
+      self._setGUIstate()
+      self.csv_dir = os.path.dirname(csv_file)
+      self.logger.info('file loaded, %d cases' % len(cases))
     except:
       self.logger.error('DOH!! something went wrong!', exc_info=True)
 
@@ -248,14 +251,20 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     self.case = newCase
 
     root = kwargs.get('root', None)
-    if root is None:
-      self.root = None
-    elif os.path.isdir(root):
-      self.root = root
-    elif root in self.case and os.path.isdir(self.case[root]):
-      self.root = self.case[root]
-    else:
-      self.root = None
+    csv_dir = kwargs.get('csv_dir', None)
+    self.root = None
+    if root is not None:  # Root is specified as a directory
+      if os.path.isdir(root):
+        self.root = root
+      elif root in self.case:  # Root points to a column in csv file
+        if os.path.isabs(self.case.root):  # Absolute path, use as it is
+          self.root = self.case[root]
+        elif csv_dir is not None:  # If it is a relative path, assume it is relative to the csv file location
+          self.root = os.path.join(csv_dir, self.case[root])
+
+        if not os.path.isdir(self.root):
+          self.root = None
+
     self.addIms = kwargs.get('addIms', [])
     self.addMas = kwargs.get('addMas', [])
     self.image = kwargs.get('image', None)
