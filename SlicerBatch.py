@@ -262,7 +262,7 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
       if os.path.isdir(root):
         self.root = root
       elif root in self.case:  # Root points to a column in csv file
-        if os.path.isabs(self.case.root):  # Absolute path, use as it is
+        if os.path.isabs(self.case[root]):  # Absolute path, use as it is
           self.root = self.case[root]
         elif csv_dir is not None:  # If it is a relative path, assume it is relative to the csv file location
           self.root = os.path.join(csv_dir, self.case[root])
