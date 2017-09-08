@@ -150,7 +150,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
 
   def onNext(self):
     if self.currentCase is None:
-      print('Loading %s...' % self.inputPathSelector.text)
+      self.logger.info('Loading %s...' % self.inputPathSelector.text)
       try:
         start = int(self.txtStart.text)
       except:
@@ -162,6 +162,11 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
 
     newCase = self._getNextCase()
     if newCase is not None:
+      patient = newCase.get('patient', None)
+      if patient is None:
+        self.logger.info('Loading next patient...')
+      else:
+        self.logger.info('Loading next patient: %s...', patient)
       settings = {}
       settings['root'] = self.rootSelector.text
       settings['image'] = self.imageSelector.text
@@ -189,7 +194,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     cases = []
     try:
       with open(csv_file) as open_csv_file:
-        print('Reading File')
+        self.logger.info('Reading File')
         csv_reader = csv.DictReader(open_csv_file)
         for row in csv_reader:
           cases.append(row)
