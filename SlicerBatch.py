@@ -61,6 +61,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     # Input CSV Path
     #
     self.inputPathSelector = qt.QLineEdit()
+    self.inputPathSelector.toolTip = 'Location of the CSV file containing the cases to process'
     parametersFormLayout.addRow('input CSV path', self.inputPathSelector)
 
     #
@@ -68,6 +69,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     #
     self.txtStart = qt.QLineEdit()
     self.txtStart.text = 1
+    self.txtStart.toolTip = 'Start position in the CSV file (1 = first patient)'
     parametersFormLayout.addRow('start position', self.txtStart)
 
     #
@@ -75,6 +77,8 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     #
     self.rootSelector = qt.QLineEdit()
     self.rootSelector.text = 'path'
+    self.rootSelector.toolTip = 'Location of the root directory to load form, or the column name specifying said' \
+                                'directory in the input CSV'
     parametersFormLayout.addRow('Root Column', self.rootSelector)
 
     #
@@ -82,6 +86,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     #
     self.imageSelector = qt.QLineEdit()
     self.imageSelector.text = 'image'
+    self.imageSelector.toolTip = 'Name of the column specifying main image files in input CSV'
     parametersFormLayout.addRow('Image Column', self.imageSelector)
 
     #
@@ -89,12 +94,15 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     #
     self.maskSelector = qt.QLineEdit()
     self.maskSelector.text = 'mask'
+    self.maskSelector.toolTip = 'Name of the column specifying main mask files in input CSV'
     parametersFormLayout.addRow('Mask Column', self.maskSelector)
 
     #
     # Additional images
     #
     self.addImsSelector = qt.QLineEdit()
+    self.addImsSelector.text = ''
+    self.addImsSelector.toolTip = 'Comma separated names of the columns specifying additional image files in input CSV'
     parametersFormLayout.addRow('Additional images Column', self.addImsSelector)
 
     #
@@ -102,24 +110,8 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     #
     self.addMasksSelector = qt.QLineEdit()
     self.addMasksSelector.text = ''
+    self.addMasksSelector.toolTip = 'Comma separated names of the columns specifying additional mask files in input CSV'
     parametersFormLayout.addRow('Additional masks Column', self.addMasksSelector)
-
-    #
-    # Generate new masks
-    #
-    self.chkGenerateMasks = qt.QCheckBox()
-    self.chkGenerateMasks.checked = 0
-    self.chkGenerateMasks.toolTip = 'generate masks if main image doesn''t have a mask yet'
-    parametersFormLayout.addRow('Generate new masks', self.chkGenerateMasks)
-
-    #
-    # Generate new masks for additional images
-    #
-    self.chkGenerateAddMasks = qt.QCheckBox()
-    self.chkGenerateAddMasks.checked = 0
-    self.chkGenerateAddMasks.toolTip = 'generate masks for all additional images (including images with additional ' \
-                                       'masks loaded'
-    parametersFormLayout.addRow('Generate additional masks', self.chkGenerateAddMasks)
 
     #
     # Save masks
@@ -130,18 +122,16 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow('Save masks', self.chkSaveMasks)
 
     #
-    # Next Case
+    # Load CSV / Next Case
     #
     self.btnNext = qt.QPushButton('Load CSV')
-    self.btnNext.toolTip = 'Calculate all feature classes.'
     self.btnNext.enabled = True
     self.layout.addWidget(self.btnNext)
 
     #
-    # Next Case
+    # Reset
     #
     self.btnReset = qt.QPushButton('Reset')
-    self.btnReset.toolTip = 'Calculate all feature classes.'
     self.btnReset.enabled = False
     self.layout.addWidget(self.btnReset)
 
@@ -167,7 +157,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
         start = 1
       self.cases = self._loadCases(self.inputPathSelector.text, start=start)
     else:
-      self.currentCase.closeCase()
+      self.currentCase.closeCase((self.chkSaveMasks.checked == 1))
 
     newCase = self._getNextCase()
     if newCase is not None:
@@ -177,9 +167,6 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       settings['mask'] = self.maskSelector.text
       settings['addIms'] = str(self.addImsSelector.text).split(',')
       settings['addMas'] = str(self.addMasksSelector.text).split(',')
-      settings['SaveMasks'] = (self.chkSaveMasks.checked == 1)
-      settings['GenerateMasks'] = (self.chkGenerateMasks.checked == 1)
-      settings['GenerateAddMasks'] = (self.chkGenerateAddMasks.checked == 1)
 
       self.currentCase = SlicerBatchLogic(newCase, **settings)
 
@@ -260,7 +247,15 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
 
     self.case = newCase
 
-    self.root = kwargs.get('root', None)
+    root = kwargs.get('root', None)
+    if root is None:
+      self.root = None
+    elif os.path.isdir(root):
+      self.root = root
+    elif root in self.case and os.path.isdir(self.case[root]):
+      self.root = self.case[root]
+    else:
+      self.root = None
     self.addIms = kwargs.get('addIms', [])
     self.addMas = kwargs.get('addMas', [])
     self.image = kwargs.get('image', None)
@@ -268,7 +263,6 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
 
     self.GenerateMasks = kwargs.get('GenerateMasks', True)
     self.GenerateAddMasks = kwargs.get('GenerateAddMasks', True)
-    self.SaveMasks = kwargs.get('SaveMasks', True)
 
     self.image_nodes = OrderedDict()
     self.mask_nodes = OrderedDict()
@@ -280,7 +274,7 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     self.logger.debug('Case initialized (settings: %s)' % kwargs)
 
   def _loadImages(self):
-    if self.root is None or self.root not in self.case:
+    if self.root is None:
       self.logger.error('Missing root path, cannot load case!')
       return False
 
@@ -297,7 +291,7 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
         continue
       if self.case[im] == '':
         continue
-      filepath = os.path.join(self.case[self.root], self.case[im])
+      filepath = os.path.join(self.root, self.case[im])
       if not os.path.isfile(filepath):
         self.logger.warning('image file for %s does not exist, skipping...', im)
       if not slicer.util.loadVolume(filepath):
@@ -313,7 +307,7 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
         continue
       if self.case[ma] == '':
         continue
-      filepath = os.path.join(self.case[self.root], self.case[ma])
+      filepath = os.path.join(self.root, self.case[ma])
       if not os.path.isfile(filepath):
         self.logger.warning('image file for %s does not exist, skipping...', ma)
       if not slicer.util.loadLabelVolume(filepath):
@@ -325,26 +319,15 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     if len(self.image_nodes) > 0:
       self._rotateToVolumePlanes(self.image_nodes.values()[0])
 
-    """
-    if self.GenerateMasks \
-      and self.image in self.image_nodes \
-      and self.mask not in self.mask_nodes:
-        pass
-
-    if self.GenerateAddMasks:
-      for im in self.image_nodes:
-        if im is not self.image:
-          pass
-    """
-
-
     return True
 
-  def closeCase(self):
-    if self.SaveMasks:
+  def closeCase(self, save_nodes=False):
+    if save_nodes:
       self._saveNodes()
     slicer.mrmlScene.Clear(0)
-    print('case closed')
+    node = slicer.vtkMRMLViewNode()
+    slicer.mrmlScene.AddNode(node)
+    self.logger.info('case closed')
 
   def _rotateToVolumePlanes(self, referenceVolume):
     sliceNodes = slicer.util.getNodes('vtkMRMLSliceNode*')
@@ -358,8 +341,21 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
       l.SnapSliceOffsetToIJK()
 
   def _saveNodes(self):
-    if self.root is None or self.root not in self.case:
+    if self.root is None:
       return
+    self.logger.info('Saving Masks...')
     nodes = self.mask_nodes.values()
-    for nodename, node in nodes:
-      slicer.util.saveNode(node, os.path.join(self.root, nodename + '.nrrd'), useCompression=1)
+
+    node_names = [n.GetName() for n in nodes]
+    new_nodes = slicer.util.getNodes('*-label*')
+
+    for node in nodes:
+      slicer.util.saveNode(node, os.path.join(self.root, node.GetName() + '.nrrd'))
+      self.logger.info('Saved node %s in %s', node.GetName(), os.path.join(self.root, node.GetName()))
+
+    for nodename, node in new_nodes.iteritems():
+      if nodename in node_names:
+        continue  # already saved, go to next
+      slicer.util.saveNode(node, os.path.join(self.root, nodename + '.nrrd'))
+      self.logger.info('Saved node %s in %s', nodename, os.path.join(self.root, nodename))
+
