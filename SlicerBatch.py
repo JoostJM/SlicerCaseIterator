@@ -115,12 +115,29 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow('Additional masks Column', self.addMasksSelector)
 
     #
+    # Reader Name
+    #
+    self.txtReaderName = qt.QLineEdit()
+    self.txtReaderName.text = ''
+    self.txtReaderName.toolTip = 'Name of the current reader; if not empty, this name will be added to the filename' \
+                                 'of saved masks'
+    parametersFormLayout.addRow('Reader name', self.txtReaderName)
+
+    #
     # Save masks
     #
     self.chkSaveMasks = qt.QCheckBox()
-    self.chkSaveMasks.checked = 1
-    self.chkSaveMasks.toolTip = 'save all masks when proceeding to next case'
-    parametersFormLayout.addRow('Save masks', self.chkSaveMasks)
+    self.chkSaveMasks.checked = 0
+    self.chkSaveMasks.toolTip = 'save all intially loaded masks when proceeding to next case'
+    parametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
+
+    #
+    # Save masks
+    #
+    self.chkSaveNewMasks = qt.QCheckBox()
+    self.chkSaveNewMasks.checked = 1
+    self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
+    parametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
 
     #
     # Load CSV / Next Case
@@ -158,8 +175,9 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
         start = 1
       self.cases = self._loadCases(self.inputPathSelector.text, start=start)
     else:
-      self.currentCase.closeCase((self.chkSaveMasks.checked == 1))
-
+      self.currentCase.closeCase(save_nodes=(self.chkSaveMasks.checked == 1),
+                                 save_new_nodes=(self.chkSaveNewMasks.checked == 1),
+                                 reader_name=self.txtReaderName.text)
     newCase = self._getNextCase()
     if newCase is not None:
       patient = newCase.get('patient', None)
@@ -337,9 +355,13 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
 
     return True
 
-  def closeCase(self, save_nodes=False):
+  def closeCase(self, save_nodes=False, save_new_nodes=False, reader_name=None):
+    if reader_name == '':
+      reader_name = None
     if save_nodes:
-      self._saveNodes()
+      self._saveNodes(reader_name)
+    if save_new_nodes:
+      self._saveNewNodes(reader_name)
     slicer.mrmlScene.Clear(0)
     node = slicer.vtkMRMLViewNode()
     slicer.mrmlScene.AddNode(node)
@@ -356,22 +378,33 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
       l = sliceLogics.GetItemAsObject(n)
       l.SnapSliceOffsetToIJK()
 
-  def _saveNodes(self):
+  def _saveNodes(self, reader_name=None):
     if self.root is None:
       return
-    self.logger.info('Saving Masks...')
+    self.logger.info('Saving loaded Masks...')
     nodes = self.mask_nodes.values()
 
+    for node in nodes:
+      nodename = node.GetName()
+      if reader_name is not None:
+        nodename += '_' + reader_name
+      filename = os.path.join(self.root, nodename + '.nrrd')
+      slicer.util.saveNode(node, filename)
+      self.logger.info('Saved node %s in %s', nodename, filename)
+
+  def _saveNewNodes(self, reader_name=None):
+    if self.root is None:
+      return
+    self.logger.info('Saving new Masks...')
+    nodes = self.mask_nodes.values()
     node_names = [n.GetName() for n in nodes]
     new_nodes = slicer.util.getNodes('*-label*')
 
-    for node in nodes:
-      slicer.util.saveNode(node, os.path.join(self.root, node.GetName() + '.nrrd'))
-      self.logger.info('Saved node %s in %s', node.GetName(), os.path.join(self.root, node.GetName()))
-
     for nodename, node in new_nodes.iteritems():
       if nodename in node_names:
-        continue  # already saved, go to next
-      slicer.util.saveNode(node, os.path.join(self.root, nodename + '.nrrd'))
-      self.logger.info('Saved node %s in %s', nodename, os.path.join(self.root, nodename))
-
+        continue  # Node not a new node, so skip it
+      if reader_name is not None:
+        nodename += '_' + reader_name
+      filename = os.path.join(self.root, nodename + '.nrrd')
+      slicer.util.saveNode(node, filename)
+      self.logger.info('Saved node %s in %s', nodename, filename)
