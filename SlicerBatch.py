@@ -293,9 +293,9 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
       return False
 
     if self.image is not None:
-      self.addIms.insert(0, self.image)
+      self.addIms.append(self.image)
     if self.mask is not None:
-      self.addMas.insert(0, self.mask)
+      self.addMas.append(self.mask)
 
     for im in self.addIms:
       if im == '':
@@ -310,7 +310,8 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
         self.logger.warning('image file for %s does not exist, skipping...', im)
       if not slicer.util.loadVolume(filepath):
         self.logger.warning('Failed to load ' + filepath)
-      im_node = slicer.util.getNode(os.path.splitext(os.path.basename(filepath))[0])
+      im_node = slicer.util.getNode(os.path.basename(filepath).split('.')[0])
+      im_node.SetName(os.path.splitext(os.path.basename(filepath))[0])
       if im_node is not None:
         self.image_nodes[im] = im_node
     for ma in self.addMas:
@@ -326,12 +327,13 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
         self.logger.warning('image file for %s does not exist, skipping...', ma)
       if not slicer.util.loadLabelVolume(filepath):
         self.logger.warning('Failed to load ' + filepath)
-      ma_node = slicer.util.getNode(os.path.splitext(os.path.basename(filepath))[0])
+      ma_node = slicer.util.getNode(os.path.basename(filepath).split('.')[0])
+      ma_node.SetName(os.path.splitext(os.path.basename(filepath))[0])
       if ma_node is not None:
         self.image_nodes[ma] = ma_node
 
     if len(self.image_nodes) > 0:
-      self._rotateToVolumePlanes(self.image_nodes.values()[0])
+      self._rotateToVolumePlanes(self.image_nodes.values()[-1])
 
     return True
 
