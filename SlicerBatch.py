@@ -373,7 +373,7 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
         self.logger.debug('No loaded masks to save...')
       else:
         self.logger.info('Saving %d loaded masks...', len(loaded_masks))
-        self._saveNodes(loaded_masks, self.image_root, reader_name)
+        self._saveMasks(loaded_masks, self.image_root, reader_name)
     if save_new_masks:
       if len(new_masks) == 0:
         self.logger.debug('No new masks to save...')
@@ -401,8 +401,22 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
 
   def _saveMasks(self, nodes, folder, reader_name=None):
     for nodename, node in nodes.iteritems():
+      # Add the readername if set
       if reader_name is not None:
         nodename += '_' + reader_name
-      filename = os.path.join(folder, nodename + '.nrrd')
+      filename = os.path.join(folder, nodename)
+
+      # Prevent overwriting existing files
+      if os.path.exists(filename + '.nrrd'):
+        self.logger.debug('Filename exists! Generating unique name...')
+        idx = 1
+        filename += '(%d).nrrd'
+        while os.path.exists(filename % idx):
+          idx += 1
+        filename = filename % idx
+      else:
+        filename += '.nrrd'
+
+      # Save the node
       slicer.util.saveNode(node, filename)
       self.logger.info('Saved node %s in %s', nodename, filename)
