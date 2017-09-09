@@ -175,8 +175,8 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
         start = 1
       self.cases = self._loadCases(self.inputPathSelector.text, start=start)
     else:
-      self.currentCase.closeCase(save_nodes=(self.chkSaveMasks.checked == 1),
-                                 save_new_nodes=(self.chkSaveNewMasks.checked == 1),
+      self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
+                                 save_new_masks=(self.chkSaveNewMasks.checked == 1),
                                  reader_name=self.txtReaderName.text)
     newCase = self._getNextCase()
     if newCase is not None:
@@ -315,6 +315,7 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     if self.mask is not None:
       self.addMas.append(self.mask)
 
+    im_filepath = None
     for im in self.addIms:
       if im == '':
         continue
@@ -323,13 +324,13 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
         continue
       if self.case[im] == '':
         continue
-      filepath = os.path.join(self.root, self.case[im])
-      if not os.path.isfile(filepath):
+      im_filepath = os.path.join(self.root, self.case[im])
+      if not os.path.isfile(im_filepath):
         self.logger.warning('image file for %s does not exist, skipping...', im)
-      if not slicer.util.loadVolume(filepath):
-        self.logger.warning('Failed to load ' + filepath)
-      im_node = slicer.util.getNode(os.path.basename(filepath).split('.')[0])
-      im_node.SetName(os.path.splitext(os.path.basename(filepath))[0])
+      if not slicer.util.loadVolume(im_filepath):
+        self.logger.warning('Failed to load ' + im_filepath)
+      im_node = slicer.util.getNode(os.path.basename(im_filepath).split('.')[0])
+      im_node.SetName(os.path.splitext(os.path.basename(im_filepath))[0])
       if im_node is not None:
         self.image_nodes[im] = im_node
     for ma in self.addMas:
@@ -340,28 +341,48 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
         continue
       if self.case[ma] == '':
         continue
-      filepath = os.path.join(self.root, self.case[ma])
-      if not os.path.isfile(filepath):
+      ma_filepath = os.path.join(self.root, self.case[ma])
+      if not os.path.isfile(ma_filepath):
         self.logger.warning('image file for %s does not exist, skipping...', ma)
-      if not slicer.util.loadLabelVolume(filepath):
-        self.logger.warning('Failed to load ' + filepath)
-      ma_node = slicer.util.getNode(os.path.basename(filepath).split('.')[0])
-      ma_node.SetName(os.path.splitext(os.path.basename(filepath))[0])
+      if not slicer.util.loadLabelVolume(ma_filepath):
+        self.logger.warning('Failed to load ' + ma_filepath)
+      ma_node = slicer.util.getNode(os.path.basename(ma_filepath).split('.')[0])
+      ma_node.SetName(os.path.splitext(os.path.basename(ma_filepath))[0])
       if ma_node is not None:
-        self.image_nodes[ma] = ma_node
+        self.mask_nodes[ma] = ma_node
 
     if len(self.image_nodes) > 0:
+      self.image_root = os.path.dirname(im_filepath)  # store the directory of the last loaded image (main image)
       self._rotateToVolumePlanes(self.image_nodes.values()[-1])
 
     return True
 
-  def closeCase(self, save_nodes=False, save_new_nodes=False, reader_name=None):
+  def closeCase(self, save_loaded_masks=False, save_new_masks=False, reader_name=None):
+
+    # Save the results (label maps reviewed or created)
     if reader_name == '':
       reader_name = None
-    if save_nodes:
-      self._saveNodes(reader_name)
-    if save_new_nodes:
-      self._saveNewNodes(reader_name)
+
+    loaded_masks = {node.GetName(): node for node in self.mask_nodes.values()}
+    new_masks = {node.GetName(): node for node in slicer.util.getNodesByClass('vtkMRMLLabelMapVolumeNode')
+                 if node.GetName() not in loaded_masks.keys()}
+
+    # If enabled, save label maps
+    if save_loaded_masks:
+      if len(loaded_masks) == 0:
+        self.logger.debug('No loaded masks to save...')
+      else:
+        self.logger.info('Saving %d loaded masks...', len(loaded_masks))
+        self._saveNodes(loaded_masks, self.image_root, reader_name)
+    if save_new_masks:
+      if len(new_masks) == 0:
+        self.logger.debug('No new masks to save...')
+      else:
+        self.logger.info('Saving %d new masks...', len(new_masks))
+        self._saveMasks(new_masks, self.image_root, reader_name)
+
+    # Close the scene and start a fresh one
+
     slicer.mrmlScene.Clear(0)
     node = slicer.vtkMRMLViewNode()
     slicer.mrmlScene.AddNode(node)
@@ -378,33 +399,10 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
       l = sliceLogics.GetItemAsObject(n)
       l.SnapSliceOffsetToIJK()
 
-  def _saveNodes(self, reader_name=None):
-    if self.root is None:
-      return
-    self.logger.info('Saving loaded Masks...')
-    nodes = self.mask_nodes.values()
-
-    for node in nodes:
-      nodename = node.GetName()
+  def _saveMasks(self, nodes, folder, reader_name=None):
+    for nodename, node in nodes.iteritems():
       if reader_name is not None:
         nodename += '_' + reader_name
-      filename = os.path.join(self.root, nodename + '.nrrd')
-      slicer.util.saveNode(node, filename)
-      self.logger.info('Saved node %s in %s', nodename, filename)
-
-  def _saveNewNodes(self, reader_name=None):
-    if self.root is None:
-      return
-    self.logger.info('Saving new Masks...')
-    nodes = self.mask_nodes.values()
-    node_names = [n.GetName() for n in nodes]
-    new_nodes = slicer.util.getNodes('*-label*')
-
-    for nodename, node in new_nodes.iteritems():
-      if nodename in node_names:
-        continue  # Node not a new node, so skip it
-      if reader_name is not None:
-        nodename += '_' + reader_name
-      filename = os.path.join(self.root, nodename + '.nrrd')
+      filename = os.path.join(folder, nodename + '.nrrd')
       slicer.util.saveNode(node, filename)
       self.logger.info('Saved node %s in %s', nodename, filename)
