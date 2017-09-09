@@ -178,13 +178,13 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
                                  save_new_masks=(self.chkSaveNewMasks.checked == 1),
                                  reader_name=self.txtReaderName.text)
-    newCase = self._getNextCase()
+    newCase, new_case_idx, case_count = self._getNextCase()
     if newCase is not None:
       patient = newCase.get('patient', None)
       if patient is None:
-        self.logger.info('Loading next patient...')
+        self.logger.info('Loading next patient (%d/%d)...', new_case_idx, case_count)
       else:
-        self.logger.info('Loading next patient: %s...', patient)
+        self.logger.info('Loading next patient (%d/%d): %s...', patient, new_case_idx, case_count)
       settings = {}
       settings['root'] = self.rootSelector.text
       settings['image'] = self.imageSelector.text
@@ -225,9 +225,10 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     # Return generator to iterate over all cases
     if len(cases) < start:
       self.logger.warning('No cases to process (%d cases, start %d)', len(cases), start)
-    for case in cases[start - 1:]:
+    count = len(cases) - start + 1
+    for case_idx, case in enumerate(cases[start - 1:], start=1):
       self.logger.debug('yielding next case %s' % case)
-      yield case
+      yield case, case_idx, count
 
   def _setGUIstate(self, csv_loaded=True):
     if csv_loaded:
