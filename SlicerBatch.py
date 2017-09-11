@@ -184,7 +184,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       if patient is None:
         self.logger.info('Loading next patient (%d/%d)...', new_case_idx, case_count)
       else:
-        self.logger.info('Loading next patient (%d/%d): %s...', patient, new_case_idx, case_count)
+        self.logger.info('Loading next patient (%d/%d): %s...',  new_case_idx, case_count, patient)
       settings = {}
       settings['root'] = self.rootSelector.text
       settings['image'] = self.imageSelector.text
@@ -355,6 +355,10 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     if len(self.image_nodes) > 0:
       self.image_root = os.path.dirname(im_filepath)  # store the directory of the last loaded image (main image)
       self._rotateToVolumePlanes(self.image_nodes.values()[-1])
+
+    if len(self.image_nodes) > 1:
+      slicer.app.layoutManager().sliceWidget('Red').sliceLogic().GetSliceCompositeNode().SetForegroundVolumeID(
+        self.image_nodes.values()[-2].GetID())
 
     return True
 
