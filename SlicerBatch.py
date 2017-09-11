@@ -68,10 +68,12 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     #
     # Start position
     #
-    self.txtStart = qt.QLineEdit()
-    self.txtStart.text = 1
-    self.txtStart.toolTip = 'Start position in the CSV file (1 = first patient)'
-    parametersFormLayout.addRow('start position', self.txtStart)
+    self.npStart = qt.QSpinBox()
+    self.npStart.minimum = 1
+    self.npStart.maximum = 999999
+    self.npStart.value = 1
+    self.npStart.toolTip = 'Start position in the CSV file (1 = first patient)'
+    parametersFormLayout.addRow('start position', self.npStart)
 
     #
     # Root Path
@@ -168,12 +170,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
   def onNext(self):
     if self.currentCase is None:
       self.logger.info('Loading %s...' % self.inputPathSelector.text)
-      try:
-        start = int(self.txtStart.text)
-      except:
-        self.logger.warning('Could not parse start number, starting at 1')
-        start = 1
-      self.cases = self._loadCases(self.inputPathSelector.text, start=start)
+      self.cases = self._loadCases(self.inputPathSelector.text, start=self.npStart.value)
     else:
       self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
                                  save_new_masks=(self.chkSaveNewMasks.checked == 1),
@@ -237,7 +234,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.btnNext.text = 'Load CSV'
     self.btnReset.enabled = csv_loaded
     self.inputPathSelector.enabled = not csv_loaded
-    self.txtStart.enabled = not csv_loaded
+    self.npStart.enabled = not csv_loaded
     self.rootSelector.enabled = not csv_loaded
     self.imageSelector.enabled = not csv_loaded
     self.maskSelector.enabled = not csv_loaded
@@ -254,7 +251,6 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     except StopIteration:
       self._setGUIstate(csv_loaded=False)
       return None
-
 #
 # SlicerBatchLogic
 #
