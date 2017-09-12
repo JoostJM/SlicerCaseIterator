@@ -46,6 +46,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.cases = None
     self.currentCase = None
 
+    self.shortcuts = []
     # Instantiate and connect widgets ...
 
     #
@@ -175,13 +176,25 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
                                  save_new_masks=(self.chkSaveNewMasks.checked == 1),
                                  reader_name=self.txtReaderName.text)
-    newCase, new_case_idx, case_count = self._getNextCase()
-    if newCase is not None:
+    self.loadNextCase()
+
+  def onShortcutActivated(self):
+    if self.currentCase is not None:
+      self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
+                                 save_new_masks=(self.chkSaveNewMasks.checked == 1),
+                                 reader_name=self.txtReaderName.text)
+      self.loadNextCase()
+
+  def loadNextCase(self):
+    if self.cases is None:
+      return
+    try:
+      newCase, new_case_idx, case_count = self.cases.next()
       patient = newCase.get('patient', None)
       if patient is None:
         self.logger.info('Loading next patient (%d/%d)...', new_case_idx, case_count)
       else:
-        self.logger.info('Loading next patient (%d/%d): %s...',  new_case_idx, case_count, patient)
+        self.logger.info('Loading next patient (%d/%d): %s...', new_case_idx, case_count, patient)
       settings = {}
       settings['root'] = self.rootSelector.text
       settings['image'] = self.imageSelector.text
@@ -191,14 +204,16 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       settings['csv_dir'] = self.csv_dir
 
       self.currentCase = SlicerBatchLogic(newCase, **settings)
+    except StopIteration:
+      self._setGUIstate(csv_loaded=False)
 
   def onReset(self):
     try:
       self.cases.close()
     except GeneratorExit:
       pass
-    self.cases = None
     self._setGUIstate(csv_loaded=False)
+    self.cases = None
 
   def _loadCases(self, csv_file, start=1):
     if not os.path.isfile(csv_file):
@@ -218,6 +233,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.logger.info('file loaded, %d cases' % len(cases))
     except:
       self.logger.error('DOH!! something went wrong!', exc_info=True)
+      return
 
     # Return generator to iterate over all cases
     if len(cases) < start:
@@ -230,8 +246,22 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
   def _setGUIstate(self, csv_loaded=True):
     if csv_loaded:
       self.btnNext.text = 'Next case'
+      if len(self.shortcuts) == 0:
+        shortcut = qt.QShortcut(slicer.util.mainWindow())
+        shortcut.setKey(qt.QKeySequence('Ctrl+N'))
+
+        shortcut.connect('activated()', self.onShortcutActivated)
+        self.shortcuts.append(shortcut)
+      else:
+        self.logger.warning('Shortcut already initialized!')
     else:
       self.btnNext.text = 'Load CSV'
+      for sc in self.shortcuts:
+        sc.disconnect('activate()')
+        sc.setParent(None)
+      self.shortcuts = []
+      self.currentCase = None
+
     self.btnReset.enabled = csv_loaded
     self.inputPathSelector.enabled = not csv_loaded
     self.npStart.enabled = not csv_loaded
@@ -240,8 +270,6 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.maskSelector.enabled = not csv_loaded
     self.addImsSelector.enabled = not csv_loaded
     self.addMasksSelector.enabled = not csv_loaded
-
-    self.currentCase = None
 
   def _getNextCase(self):
     if self.cases is None:
@@ -297,8 +325,10 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     self.mask_nodes = OrderedDict()
 
     if self._loadImages():
-
-      slicer.util.selectModule('Editor')
+      if slicer.util.selectedModule() == 'Editor':
+        slicer.modules.EditorWidget.enter()
+      else:
+        slicer.util.selectModule('Editor')
 
     self.logger.debug('Case initialized (settings: %s)' % kwargs)
 
@@ -383,6 +413,8 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
         self._saveMasks(new_masks, self.image_root, reader_name)
 
     # Close the scene and start a fresh one
+    if slicer.util.selectedModule() == 'Editor':
+      slicer.modules.EditorWidget.exit()
 
     slicer.mrmlScene.Clear(0)
     node = slicer.vtkMRMLViewNode()
