@@ -271,14 +271,6 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.addImsSelector.enabled = not csv_loaded
     self.addMasksSelector.enabled = not csv_loaded
 
-  def _getNextCase(self):
-    if self.cases is None:
-      return
-    try:
-      return self.cases.next()
-    except StopIteration:
-      self._setGUIstate(csv_loaded=False)
-      return None
 #
 # SlicerBatchLogic
 #
@@ -354,12 +346,16 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
       im_filepath = os.path.join(self.root, self.case[im])
       if not os.path.isfile(im_filepath):
         self.logger.warning('image file for %s does not exist, skipping...', im)
-      if not slicer.util.loadVolume(im_filepath):
+      load_success, im_node = slicer.util.loadVolume(im_filepath, returnNode=True)
+      if not load_success:
         self.logger.warning('Failed to load ' + im_filepath)
-      im_node = slicer.util.getNode(os.path.basename(im_filepath).split('.')[0])
+        continue
       im_node.SetName(os.path.splitext(os.path.basename(im_filepath))[0])
       if im_node is not None:
         self.image_nodes[im] = im_node
+
+    self.logger.debug('Loaded %d image(s)' % len(self.image_nodes))
+
     for ma in self.addMas:
       if ma == '':
         continue
@@ -371,12 +367,15 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
       ma_filepath = os.path.join(self.root, self.case[ma])
       if not os.path.isfile(ma_filepath):
         self.logger.warning('image file for %s does not exist, skipping...', ma)
-      if not slicer.util.loadLabelVolume(ma_filepath):
+      load_success, ma_node = slicer.util.loadLabelVolume(ma_filepath, returnNode=True)
+      if not load_success:
         self.logger.warning('Failed to load ' + ma_filepath)
-      ma_node = slicer.util.getNode(os.path.basename(ma_filepath).split('.')[0])
+        continue
       ma_node.SetName(os.path.splitext(os.path.basename(ma_filepath))[0])
       if ma_node is not None:
         self.mask_nodes[ma] = ma_node
+
+    self.logger.debug('Loaded %d mask(s)' % len(self.mask_nodes))
 
     if len(self.image_nodes) > 0:
       self.image_root = os.path.dirname(im_filepath)  # store the directory of the last loaded image (main image)
