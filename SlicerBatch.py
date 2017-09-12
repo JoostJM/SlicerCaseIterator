@@ -238,8 +238,8 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     # Return generator to iterate over all cases
     if len(cases) < start:
       self.logger.warning('No cases to process (%d cases, start %d)', len(cases), start)
-    count = len(cases) - start + 1
-    for case_idx, case in enumerate(cases[start - 1:], start=1):
+    count = len(cases)
+    for case_idx, case in enumerate(cases[start - 1:], start=start):
       self.logger.debug('yielding next case %s' % case)
       yield case, case_idx, count
 
