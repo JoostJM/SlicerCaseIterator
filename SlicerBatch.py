@@ -170,6 +170,11 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
 
   def onNext(self):
     if self.currentCase is None:
+      # Lock GUI during loading
+      self.btnNext.enabled = False
+      self.btnReset.enabled = False
+      self.btnNext.text = 'Loading...'
+
       self.logger.info('Loading %s...' % self.inputPathSelector.text)
       self.cases = self._loadCases(self.inputPathSelector.text, start=self.npStart.value)
     else:
@@ -199,11 +204,21 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       settings['root'] = self.rootSelector.text
       settings['image'] = self.imageSelector.text
       settings['mask'] = self.maskSelector.text
-      settings['addIms'] = str(self.addImsSelector.text).split(',')
-      settings['addMas'] = str(self.addMasksSelector.text).split(',')
+      settings['addIms'] = [im.strip() for im in str(self.addImsSelector.text).split(',')]
+      settings['addMas'] = [ma.strip() for ma in str(self.addMasksSelector.text).split(',')]
       settings['csv_dir'] = self.csv_dir
 
+      # Lock GUI during loading of next case (first case already locked by btnNext Click)
+      self.btnNext.enabled = False
+      self.btnReset.enabled = False
+      self.btnNext.text = 'Loading...'
+
       self.currentCase = SlicerBatchLogic(newCase, **settings)
+
+      # Unlock GUI
+      self.btnNext.enabled = True
+      self.btnReset.enabled = True
+      self.btnNext.text = 'Next Case'
     except StopIteration:
       self._setGUIstate(csv_loaded=False)
 
@@ -243,6 +258,8 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.logger.debug('yielding next case %s' % case)
       yield case, case_idx, count
 
+    self.logger.info('########## All Done! ##########')
+
   def _setGUIstate(self, csv_loaded=True):
     if csv_loaded:
       self.btnNext.text = 'Next case'
@@ -255,6 +272,8 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       else:
         self.logger.warning('Shortcut already initialized!')
     else:
+      # Button Next is locked when loading cases, ensure it is unlocked to load new batch
+      self.btnNext.enabled = True
       self.btnNext.text = 'Load CSV'
       for sc in self.shortcuts:
         sc.disconnect('activate()')
