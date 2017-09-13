@@ -322,7 +322,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
 
       # Remove the keyboard shortcut
       for sc in self.shortcuts:
-        sc.disconnect('activate()')
+        sc.disconnect('activated()')
         sc.setParent(None)
       self.shortcuts = []
 
