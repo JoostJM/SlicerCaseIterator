@@ -41,12 +41,16 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     # Setup a logger for the extension log messages
     self.logger = logging.getLogger('slicerBatch')
 
-    # Variables to hold current case and all cases to process
-    self.csv_dir = None
-    self.cases = None
-    self.currentCase = None
+    # Instantiate some variables used during iteration
+    self.csv_dir = None  # Directory containing the file specifying the cases, needed when using relative paths
+    self.cases = None  # Holds the generator to iterate over all cases
+    self.currentCase = None  # Represents the currently loaded case
 
+    # These variables hold connections to other parts of Slicer, such as registered keyboard shortcuts and
+    # Event observers
     self.shortcuts = []
+    self.observers = []
+
     # Instantiate and connect widgets ...
 
     #
@@ -167,9 +171,21 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
         self.cases.close()
       except GeneratorExit:
         pass
+      self._setGUIstate(csv_loaded=False)  # Reset the GUI to ensure observers and shortcuts are removed
+      self.currentCase = None
+      self.cases = None
+
+  def onReset(self):
+    try:
+      self.cases.close()
+    except GeneratorExit:
+      pass
+    self._setGUIstate(csv_loaded=False)
+    self.currentCase = None
+    self.cases = None
 
   def onNext(self):
-    if self.currentCase is None:
+    if self.cases is None:
       # Lock GUI during loading
       self.btnNext.enabled = False
       self.btnReset.enabled = False
@@ -177,22 +193,37 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
 
       self.logger.info('Loading %s...' % self.inputPathSelector.text)
       self.cases = self._loadCases(self.inputPathSelector.text, start=self.npStart.value)
-    else:
-      self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
-                                 save_new_masks=(self.chkSaveNewMasks.checked == 1),
-                                 reader_name=self.txtReaderName.text)
+
     self.loadNextCase()
 
   def onShortcutActivated(self):
+    # Try to load next case
+    self.loadNextCase()
+
+  def onEndClose(self, caller, event):
+    if self.currentCase is not None:
+      self.currentCase = None
+      self.logger.info('case closed')
+
+  def loadNextCase(self):
+    """
+    If a batch of cases is loaded, this function proceeds to the next case. If a current case is open, it is saved
+    and closed. Next, a new case is obtained from the generator, which is then loaded as the new ``currentCase``.
+    If the last case was loaded, the generator will raise an StopIteration exception, which is handled by this function
+    and used to reset the GUI to allow for loading a new batch of cases.
+    """
+    if self.cases is None:
+      return
+
+    # If a case is open, save it and close it before attempting to load a new case
     if self.currentCase is not None:
       self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
                                  save_new_masks=(self.chkSaveNewMasks.checked == 1),
                                  reader_name=self.txtReaderName.text)
-      self.loadNextCase()
 
-  def loadNextCase(self):
-    if self.cases is None:
-      return
+    # Attempt to load a new case. If the current case was the last one, a
+    # StopIteration exception will be raised and handled, which resets the
+    # GUI to allow loading another batch of cases
     try:
       newCase, new_case_idx, case_count = self.cases.next()
       patient = newCase.get('patient', None)
@@ -221,16 +252,21 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.btnNext.text = 'Next Case'
     except StopIteration:
       self._setGUIstate(csv_loaded=False)
-
-  def onReset(self):
-    try:
-      self.cases.close()
-    except GeneratorExit:
-      pass
-    self._setGUIstate(csv_loaded=False)
-    self.cases = None
+      self.cases = None
 
   def _loadCases(self, csv_file, start=1):
+    """
+    This function reads the provided CSV file (after checking it exists) and returns a generator to iterate over
+    the cases, starting at the specified start position. If cases are loaded successfully, but no cases are available
+    to iterate over (less cases than specified start position), an empty generator will be returned. This is a valid
+    generator, but will raise the StopIteration exception on the first call to ``next()``.
+
+    :param csv_file: Path to the csv file containing the cases. If the file doesn't exist, an empty generator is
+      returned.
+    :param start: Position to start the iteration at. Start = 1 (default) starts iteration at first case.
+    :return: Generator to iterate over patients. Generator returns tuple of next case (dictionary), case position (int)
+      and total number of cases (int).
+    """
     if not os.path.isfile(csv_file):
       self.logger.warning('Your input does not exist. Try again...')
       return
@@ -263,6 +299,8 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
   def _setGUIstate(self, csv_loaded=True):
     if csv_loaded:
       self.btnNext.text = 'Next case'
+
+      # Connect the CTRL + N Shortcut
       if len(self.shortcuts) == 0:
         shortcut = qt.QShortcut(slicer.util.mainWindow())
         shortcut.setKey(qt.QKeySequence('Ctrl+N'))
@@ -271,15 +309,27 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
         self.shortcuts.append(shortcut)
       else:
         self.logger.warning('Shortcut already initialized!')
+
+      # Add an observer for the "MRML Scene End Close Event"
+      if len(self.observers) == 0:
+        self.observers.append(slicer.mrmlScene.AddObserver(slicer.mrmlScene.EndCloseEvent, self.onEndClose))
+      else:
+        self.logger.warning('Event observer already initialized!')
     else:
       # Button Next is locked when loading cases, ensure it is unlocked to load new batch
       self.btnNext.enabled = True
       self.btnNext.text = 'Load CSV'
+
+      # Remove the keyboard shortcut
       for sc in self.shortcuts:
         sc.disconnect('activate()')
         sc.setParent(None)
       self.shortcuts = []
-      self.currentCase = None
+
+      # Remove the event observer
+      for obs in self.observers:
+        slicer.mrmlScene.RemoveObserver(obs)
+      self.observers = []
 
     self.btnReset.enabled = csv_loaded
     self.inputPathSelector.enabled = not csv_loaded
@@ -437,7 +487,6 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     slicer.mrmlScene.Clear(0)
     node = slicer.vtkMRMLViewNode()
     slicer.mrmlScene.AddNode(node)
-    self.logger.info('case closed')
 
   def _rotateToVolumePlanes(self, referenceVolume):
     sliceNodes = slicer.util.getNodes('vtkMRMLSliceNode*')
