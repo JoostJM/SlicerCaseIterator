@@ -52,6 +52,14 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
+  # New feature: load the input as a table and show in in de module panel
+  # tableNode = slicer.vtkMRMLTableNode()
+  # slicer.mrmlScene.AddNode(tableNode)
+
+  # tableView=slicer.qMRMLTableView()
+  # tableView.setMRMLTableNode(tableNode)
+  # tableView.show()
+
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
 
@@ -62,6 +70,8 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.csv_dir = None  # Directory containing the file specifying the cases, needed when using relative paths
     self.cases = None  # Holds the generator to iterate over all cases
     self.currentCase = None  # Represents the currently loaded case
+    self.caseCount = 0
+    self.currentIdx = -1
 
     # These variables hold connections to other parts of Slicer, such as registered keyboard shortcuts and
     # Event observers
@@ -71,21 +81,60 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     # Instantiate and connect widgets ...
 
     #
-    # Parameters Area
+    # Select and Load input data section
     #
-    parametersCollapsibleButton = ctk.ctkCollapsibleButton()
-    parametersCollapsibleButton.text = 'Parameters'
-    self.layout.addWidget(parametersCollapsibleButton)
 
-    # Layout within the dummy collapsible button
-    parametersFormLayout = qt.QFormLayout(parametersCollapsibleButton)
+    self.inputDataCollapsibleButton = ctk.ctkCollapsibleButton()
+    self.inputDataCollapsibleButton.text = 'Select and Load case data'
+    self.layout.addWidget(self.inputDataCollapsibleButton)
+
+    inputDataFormLayout = qt.QFormLayout(self.inputDataCollapsibleButton)
 
     #
     # Input CSV Path
     #
     self.inputPathSelector = ctk.ctkPathLineEdit()
     self.inputPathSelector.toolTip = 'Location of the CSV file containing the cases to process'
-    parametersFormLayout.addRow('input CSV path', self.inputPathSelector)
+    inputDataFormLayout.addRow('input CSV path', self.inputPathSelector)
+
+    self.loadBatchButton = qt.QPushButton('Load Input Data')
+    self.loadBatchButton.enabled = False
+    self.loadBatchButton.toolTip = 'Load the select file into the input Table'
+    inputDataFormLayout.addRow(self.loadBatchButton)
+
+    self.batchTableSelector = slicer.qMRMLNodeComboBox()
+    self.batchTableSelector.nodeTypes = ['vtkMRMLTableNode']
+    self.batchTableSelector.addEnabled = True
+    self.batchTableSelector.selectNodeUponCreation = True
+    self.batchTableSelector.renameEnabled = True
+    self.batchTableSelector.removeEnabled = True
+    self.batchTableSelector.noneEnabled = False
+    self.batchTableSelector.setMRMLScene(slicer.mrmlScene)
+    self.batchTableSelector.toolTip = 'Select the table representing the cases to process.'
+    inputDataFormLayout.addRow(self.batchTableSelector)
+
+    self.batchTableView = slicer.qMRMLTableView()
+    inputDataFormLayout.addRow(self.batchTableView)
+    self.batchTableView.show()
+
+    #
+    # Parameters Area
+    #
+    self.parametersCollapsibleButton = ctk.ctkCollapsibleButton()
+    self.parametersCollapsibleButton.text = 'Parameters'
+    self.layout.addWidget(self.parametersCollapsibleButton)
+
+    # Layout within the dummy collapsible button
+    parametersFormLayout = qt.QFormLayout(self.parametersCollapsibleButton)
+
+    #
+    # Input parameters GroupBox
+    #
+
+    self.inputParametersGroupBox = qt.QGroupBox('Input parameters')
+    parametersFormLayout.addRow(self.inputParametersGroupBox)
+
+    inputParametersFormLayout = qt.QFormLayout(self.inputParametersGroupBox)
 
     #
     # Start position
@@ -95,7 +144,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.npStart.maximum = 999999
     self.npStart.value = 1
     self.npStart.toolTip = 'Start position in the CSV file (1 = first patient)'
-    parametersFormLayout.addRow('start position', self.npStart)
+    inputParametersFormLayout.addRow('start position', self.npStart)
 
     #
     # Root Path
@@ -104,7 +153,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.rootSelector.text = 'path'
     self.rootSelector.toolTip = 'Location of the root directory to load form, or the column name specifying said' \
                                 'directory in the input CSV'
-    parametersFormLayout.addRow('Root Column', self.rootSelector)
+    inputParametersFormLayout.addRow('Root Column', self.rootSelector)
 
     #
     # Image Path
@@ -112,7 +161,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.imageSelector = qt.QLineEdit()
     self.imageSelector.text = 'image'
     self.imageSelector.toolTip = 'Name of the column specifying main image files in input CSV'
-    parametersFormLayout.addRow('Image Column', self.imageSelector)
+    inputParametersFormLayout.addRow('Image Column', self.imageSelector)
 
     #
     # Mask Path
@@ -120,7 +169,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.maskSelector = qt.QLineEdit()
     self.maskSelector.text = 'mask'
     self.maskSelector.toolTip = 'Name of the column specifying main mask files in input CSV'
-    parametersFormLayout.addRow('Mask Column', self.maskSelector)
+    inputParametersFormLayout.addRow('Mask Column', self.maskSelector)
 
     #
     # Additional images
@@ -128,7 +177,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.addImsSelector = qt.QLineEdit()
     self.addImsSelector.text = ''
     self.addImsSelector.toolTip = 'Comma separated names of the columns specifying additional image files in input CSV'
-    parametersFormLayout.addRow('Additional images Column', self.addImsSelector)
+    inputParametersFormLayout.addRow('Additional images Column', self.addImsSelector)
 
     #
     # Additional masks
@@ -136,7 +185,16 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.addMasksSelector = qt.QLineEdit()
     self.addMasksSelector.text = ''
     self.addMasksSelector.toolTip = 'Comma separated names of the columns specifying additional mask files in input CSV'
-    parametersFormLayout.addRow('Additional masks Column', self.addMasksSelector)
+    inputParametersFormLayout.addRow('Additional masks Column', self.addMasksSelector)
+
+    #
+    # Output parameters GroupBox
+    #
+
+    self.outputParametersGroupBox = qt.QGroupBox('Output')
+    parametersFormLayout.addRow(self.outputParametersGroupBox)
+
+    outputParametersFormLayout = qt.QFormLayout(self.outputParametersGroupBox)
 
     #
     # Reader Name
@@ -145,7 +203,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.txtReaderName.text = ''
     self.txtReaderName.toolTip = 'Name of the current reader; if not empty, this name will be added to the filename' \
                                  'of saved masks'
-    parametersFormLayout.addRow('Reader name', self.txtReaderName)
+    outputParametersFormLayout.addRow('Reader name', self.txtReaderName)
 
     #
     # Auto-redirect to Editor
@@ -154,7 +212,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.chkAutoRedirect = qt.QCheckBox()
     self.chkAutoRedirect.checked = 1
     self.chkAutoRedirect.toolTip = 'Automatically switch module to "Editor" when each case is loaded'
-    parametersFormLayout.addRow('Go to editor', self.chkAutoRedirect)
+    outputParametersFormLayout.addRow('Go to editor', self.chkAutoRedirect)
 
     #
     # Save masks
@@ -162,7 +220,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.chkSaveMasks = qt.QCheckBox()
     self.chkSaveMasks.checked = 0
     self.chkSaveMasks.toolTip = 'save all intially loaded masks when proceeding to next case'
-    parametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
+    outputParametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
 
     #
     # Save masks
@@ -170,68 +228,84 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.chkSaveNewMasks = qt.QCheckBox()
     self.chkSaveNewMasks.checked = 1
     self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
-    parametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
+    outputParametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
+
+    #
+    # Previous Case
+    #
+
+    self.previousButton = qt.QPushButton('Previous Case')
+    self.previousButton.visible = False
+    self.layout.addWidget(self.previousButton)
 
     #
     # Load CSV / Next Case
     #
-    self.btnNext = qt.QPushButton('Load CSV')
-    self.btnNext.enabled = True
-    self.layout.addWidget(self.btnNext)
+    self.nextButton = qt.QPushButton('Next Case')
+    self.nextButton.visible = False
+    self.layout.addWidget(self.nextButton)
 
     #
     # Reset
     #
-    self.btnReset = qt.QPushButton('Reset')
-    self.btnReset.enabled = False
-    self.layout.addWidget(self.btnReset)
+    self.resetButton = qt.QPushButton('Start Batch')
+    self.resetButton.enabled = False
+    self.layout.addWidget(self.resetButton)
 
-    self.btnNext.connect('clicked(bool)', self.onNext)
-    self.btnReset.connect('clicked(bool)', self.onReset)
+    self.layout.addStretch(1)
+
+    #
+    # Connect buttons to functions
+    #
+
+    self.previousButton.connect('clicked(bool)', self.onPrevious)
+    self.nextButton.connect('clicked(bool)', self.onNext)
+    self.resetButton.connect('clicked(bool)', self.onReset)
 
     self._setGUIstate(csv_loaded=False)
 
   def cleanup(self):
     if self.cases is not None:
-      try:
-        self.cases.close()
-      except GeneratorExit:
-        pass
       self._setGUIstate(csv_loaded=False)  # Reset the GUI to ensure observers and shortcuts are removed
       self.currentCase = None
       self.cases = None
+      self.currentIdx = -1
 
   def onReset(self):
-    try:
-      self.cases.close()
-    except GeneratorExit:
-      pass
-    self._setGUIstate(csv_loaded=False)
-    self.currentCase = None
-    self.cases = None
+    if self.cases is None:
+      # Lock GUI during loading
+      self.previousButton.enabled = False
+      self.nextButton.enabled = False
+      self.resetButton.enabled = False
+      self.nextButton.text = 'Loading...'
+
+      self.logger.info('Loading %s...' % self.inputPathSelector.currentPath)
+      if self._loadBatch(self.inputPathSelector.currentPath, start=self.npStart.value):
+        self.loadCase(0)  # Load the currently selected case
+    else:
+      self._setGUIstate(csv_loaded=False)
+      self.currentCase = None
+      self.cases = None
+      self.currentIdx = -1
+
+  def onPrevious(self):
+    if self.cases is None:
+      return
+
+    self.loadCase(-1)
 
   def onNext(self):
     if self.cases is None:
-      # Lock GUI during loading
-      self.btnNext.enabled = False
-      self.btnReset.enabled = False
-      self.btnNext.text = 'Loading...'
+      return
 
-      self.logger.info('Loading %s...' % self.inputPathSelector.currentPath)
-      self.cases = self._loadCases(self.inputPathSelector.currentPath, start=self.npStart.value)
-
-    self.loadNextCase()
-
-  def onShortcutActivated(self):
-    # Try to load next case
-    self.loadNextCase()
+    self.loadCase(1)
 
   def onEndClose(self, caller, event):
     if self.currentCase is not None:
       self.currentCase = None
       self.logger.info('case closed')
 
-  def loadNextCase(self):
+  def loadCase(self, idx_change):
     """
     If a batch of cases is loaded, this function proceeds to the next case. If a current case is open, it is saved
     and closed. Next, a new case is obtained from the generator, which is then loaded as the new ``currentCase``.
@@ -239,6 +313,11 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     and used to reset the GUI to allow for loading a new batch of cases.
     """
     if self.cases is None:
+      return
+
+    if self.currentIdx + idx_change < 0:
+      # Cannot select a negative index, so give a warning and exit the function
+      self.logger.warning('First case selected, cannot select previous case!')
       return
 
     # If a case is open, save it and close it before attempting to load a new case
@@ -250,38 +329,46 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     # Attempt to load a new case. If the current case was the last one, a
     # StopIteration exception will be raised and handled, which resets the
     # GUI to allow loading another batch of cases
-    try:
-      newCase, new_case_idx, case_count = self.cases.next()
-      patient = newCase.get('patient', None)
-      if patient is None:
-        self.logger.info('Loading next patient (%d/%d)...', new_case_idx, case_count)
-      else:
-        self.logger.info('Loading next patient (%d/%d): %s...', new_case_idx, case_count, patient)
-      settings = {}
-      settings['root'] = self.rootSelector.text
-      settings['image'] = self.imageSelector.text
-      settings['mask'] = self.maskSelector.text
-      settings['addIms'] = [im.strip() for im in str(self.addImsSelector.text).split(',')]
-      settings['addMas'] = [ma.strip() for ma in str(self.addMasksSelector.text).split(',')]
-      settings['csv_dir'] = self.csv_dir
-      settings['redirect'] = (self.chkAutoRedirect.checked == 1)
 
-      # Lock GUI during loading of next case (first case already locked by btnNext Click)
-      self.btnNext.enabled = False
-      self.btnReset.enabled = False
-      self.btnNext.text = 'Loading...'
-
-      self.currentCase = SlicerBatchLogic(newCase, **settings)
-
-      # Unlock GUI
-      self.btnNext.enabled = True
-      self.btnReset.enabled = True
-      self.btnNext.text = 'Next Case'
-    except StopIteration:
+    self.currentIdx += idx_change
+    if self.currentIdx >= self.caseCount:
       self._setGUIstate(csv_loaded=False)
       self.cases = None
+      self.currentIdx = -1
+      self.logger.info('########## All Done! ##########')
+      return
 
-  def _loadCases(self, csv_file, start=1):
+    # Lock GUI during loading
+    self.previousButton.enabled = False
+    self.nextButton.enabled = False
+    self.resetButton.enabled = False
+    self.nextButton.text = 'Loading...'
+
+    newCase = self.cases[self.currentIdx]
+
+    patient = newCase.get('patient', None)
+    if patient is None:
+      self.logger.info('Loading next patient (%d/%d)...', self.currentIdx + 1, self.caseCount)
+    else:
+      self.logger.info('Loading next patient (%d/%d): %s...', self.currentIdx + 1, self.caseCount, patient)
+    settings = {}
+    settings['root'] = self.rootSelector.text
+    settings['image'] = self.imageSelector.text
+    settings['mask'] = self.maskSelector.text
+    settings['addIms'] = [im.strip() for im in str(self.addImsSelector.text).split(',')]
+    settings['addMas'] = [ma.strip() for ma in str(self.addMasksSelector.text).split(',')]
+    settings['csv_dir'] = self.csv_dir
+    settings['redirect'] = (self.chkAutoRedirect.checked == 1)
+
+    self.currentCase = SlicerBatchLogic(newCase, **settings)
+
+    # Unlock GUI
+    self.previousButton.enabled = True
+    self.nextButton.enabled = True
+    self.resetButton.enabled = True
+    self.nextButton.text = 'Next Case'
+
+  def _loadBatch(self, csv_file, start=1):
     """
     This function reads the provided CSV file (after checking it exists) and returns a generator to iterate over
     the cases, starting at the specified start position. If cases are loaded successfully, but no cases are available
@@ -291,51 +378,62 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     :param csv_file: Path to the csv file containing the cases. If the file doesn't exist, an empty generator is
       returned.
     :param start: Position to start the iteration at. Start = 1 (default) starts iteration at first case.
-    :return: Generator to iterate over patients. Generator returns tuple of next case (dictionary), case position (int)
-      and total number of cases (int).
+    :return: True if successfully loaded some cases, False otherwise
     """
     if not os.path.isfile(csv_file):
       self.logger.warning('Your input does not exist. Try again...')
-      return
+      return False
 
     # Load cases
-    cases = []
+    self.cases = []
     try:
       with open(csv_file) as open_csv_file:
         self.logger.info('Reading File')
         csv_reader = csv.DictReader(open_csv_file)
         for row in csv_reader:
-          cases.append(row)
-      self._setGUIstate()
+          self.cases.append(row)
       self.csv_dir = os.path.dirname(csv_file)
-      self.logger.info('file loaded, %d cases' % len(cases))
+      self.logger.info('file loaded, %d cases' % len(self.cases))
     except:
       self.logger.error('DOH!! something went wrong!', exc_info=True)
-      return
+      self.cases = None
+      return False
 
     # Return generator to iterate over all cases
-    if len(cases) < start:
-      self.logger.warning('No cases to process (%d cases, start %d)', len(cases), start)
-    count = len(cases)
-    for case_idx, case in enumerate(cases[start - 1:], start=start):
-      self.logger.debug('yielding next case %s' % case)
-      yield case, case_idx, count
+    if len(self.cases) < start:
+      self.logger.warning('No cases to process (%d cases, start %d)', len(self.cases), start)
+      self.cases = None
+      return False
 
-    self.logger.info('########## All Done! ##########')
+    self._setGUIstate()
+    self.caseCount = len(self.cases)
+    self.currentIdx = start - 1
+    print('starting at case %d' % start)
+    return True
 
   def _setGUIstate(self, csv_loaded=True):
     if csv_loaded:
-      self.btnNext.text = 'Next case'
+      self.resetButton.text = 'Reset'
+
+      # Collapse input parameter sections
+      self.inputDataCollapsibleButton.collapsed = True
+      self.parametersCollapsibleButton.collapsed = True
 
       # Connect the CTRL + N Shortcut
       if len(self.shortcuts) == 0:
-        shortcut = qt.QShortcut(slicer.util.mainWindow())
-        shortcut.setKey(qt.QKeySequence('Ctrl+N'))
+        shortcutNext = qt.QShortcut(slicer.util.mainWindow())
+        shortcutNext.setKey(qt.QKeySequence('Ctrl+N'))
 
-        shortcut.connect('activated()', self.onShortcutActivated)
-        self.shortcuts.append(shortcut)
+        shortcutNext.connect('activated()', self.onNext)
+        self.shortcuts.append(shortcutNext)
+
+        shortcutPrevious = qt.QShortcut(slicer.util.mainWindow())
+        shortcutPrevious.setKey(qt.QKeySequence('Ctrl+P'))
+
+        shortcutPrevious.connect('activated()', self.onPrevious)
+        self.shortcuts.append(shortcutPrevious)
       else:
-        self.logger.warning('Shortcut already initialized!')
+        self.logger.warning('Shortcuts already initialized!')
 
       # Add an observer for the "MRML Scene End Close Event"
       if len(self.observers) == 0:
@@ -343,9 +441,9 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       else:
         self.logger.warning('Event observer already initialized!')
     else:
-      # Button Next is locked when loading cases, ensure it is unlocked to load new batch
-      self.btnNext.enabled = True
-      self.btnNext.text = 'Load CSV'
+      # reset Button is locked when loading cases, ensure it is unlocked to load new batch
+      self.resetButton.enabled = True
+      self.resetButton.text = 'Start Batch'
 
       # Remove the keyboard shortcut
       for sc in self.shortcuts:
@@ -358,14 +456,15 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
         slicer.mrmlScene.RemoveObserver(obs)
       self.observers = []
 
-    self.btnReset.enabled = csv_loaded
+    self.previousButton.visible = csv_loaded
+    self.nextButton.visible = csv_loaded
+
     self.inputPathSelector.enabled = not csv_loaded
-    self.npStart.enabled = not csv_loaded
-    self.rootSelector.enabled = not csv_loaded
-    self.imageSelector.enabled = not csv_loaded
-    self.maskSelector.enabled = not csv_loaded
-    self.addImsSelector.enabled = not csv_loaded
-    self.addMasksSelector.enabled = not csv_loaded
+    self.loadBatchButton.enabled = not csv_loaded
+    self.batchTableSelector.enabled = not csv_loaded
+    self.batchTableView.enabled = not csv_loaded
+    self.inputParametersGroupBox.enabled = not csv_loaded
+
 
 #
 # SlicerBatchLogic
