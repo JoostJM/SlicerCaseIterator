@@ -1,3 +1,18 @@
+#!/usr/bin/env python
+
+# =========================================================================
+#  Copyright Joost van Griethuysen
+#
+#  Licensed under the 3-Clause BSD-License (the "License");
+#  you may not use this file except in compliance with the License.
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+# ========================================================================
+
 import csv
 from collections import OrderedDict
 import logging
@@ -26,6 +41,8 @@ class SlicerBatch(ScriptedLoadableModule):
     This is a scripted loadable module to process a batch of images for segmentation.
     """
     self.parent.acknowledgementText = ""
+
+
 #
 # SlicerBatchWidget
 #
@@ -66,7 +83,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     #
     # Input CSV Path
     #
-    self.inputPathSelector = qt.QLineEdit()
+    self.inputPathSelector = ctk.ctkPathLineEdit()
     self.inputPathSelector.toolTip = 'Location of the CSV file containing the cases to process'
     parametersFormLayout.addRow('input CSV path', self.inputPathSelector)
 
@@ -131,6 +148,15 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow('Reader name', self.txtReaderName)
 
     #
+    # Auto-redirect to Editor
+    #
+
+    self.chkAutoRedirect = qt.QCheckBox()
+    self.chkAutoRedirect.checked = 1
+    self.chkAutoRedirect.toolTip = 'Automatically switch module to "Editor" when each case is loaded'
+    parametersFormLayout.addRow('Go to editor', self.chkAutoRedirect)
+
+    #
     # Save masks
     #
     self.chkSaveMasks = qt.QCheckBox()
@@ -191,8 +217,8 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.btnReset.enabled = False
       self.btnNext.text = 'Loading...'
 
-      self.logger.info('Loading %s...' % self.inputPathSelector.text)
-      self.cases = self._loadCases(self.inputPathSelector.text, start=self.npStart.value)
+      self.logger.info('Loading %s...' % self.inputPathSelector.currentPath)
+      self.cases = self._loadCases(self.inputPathSelector.currentPath, start=self.npStart.value)
 
     self.loadNextCase()
 
@@ -238,6 +264,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       settings['addIms'] = [im.strip() for im in str(self.addImsSelector.text).split(',')]
       settings['addMas'] = [ma.strip() for ma in str(self.addMasksSelector.text).split(',')]
       settings['csv_dir'] = self.csv_dir
+      settings['redirect'] = (self.chkAutoRedirect.checked == 1)
 
       # Lock GUI during loading of next case (first case already locked by btnNext Click)
       self.btnNext.enabled = False
@@ -382,10 +409,14 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     self.GenerateMasks = kwargs.get('GenerateMasks', True)
     self.GenerateAddMasks = kwargs.get('GenerateAddMasks', True)
 
+    self.redirect = kwargs.get('redirect', True)
+
     self.image_nodes = OrderedDict()
     self.mask_nodes = OrderedDict()
 
-    if self._loadImages():
+    # Load images (returns True if loaded correctly) and check redirect:
+    # if redirect = True, switch to Editor module or refresh to ensure user is prompted to add new segementation
+    if self._loadImages() and self.redirect:
       if slicer.util.selectedModule() == 'Editor':
         slicer.modules.EditorWidget.enter()
       else:
@@ -452,6 +483,10 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
 
     if len(self.image_nodes) > 1:
       slicer.app.layoutManager().sliceWidget('Red').sliceLogic().GetSliceCompositeNode().SetForegroundVolumeID(
+        self.image_nodes.values()[-2].GetID())
+      slicer.app.layoutManager().sliceWidget('Green').sliceLogic().GetSliceCompositeNode().SetForegroundVolumeID(
+        self.image_nodes.values()[-2].GetID())
+      slicer.app.layoutManager().sliceWidget('Yellow').sliceLogic().GetSliceCompositeNode().SetForegroundVolumeID(
         self.image_nodes.values()[-2].GetID())
 
     return True
