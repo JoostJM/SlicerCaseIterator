@@ -34,7 +34,7 @@ class SlicerBatch(ScriptedLoadableModule):
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = 'SlicerBatch'
-    self.parent.categories = ['Informatics']
+    self.parent.categories = ['Utilities']
     self.parent.dependencies = []
     self.parent.contributors = ["Joost van Griethuysen (AVL-NKI)"]
     self.parent.helpText = """
