@@ -68,10 +68,10 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
 
     # Instantiate some variables used during iteration
     self.csv_dir = None  # Directory containing the file specifying the cases, needed when using relative paths
-    self.cases = None  # Holds the generator to iterate over all cases
+    self.caseColumns = None  # Dictionary holding the specified (and found) columns from the batchTable
     self.currentCase = None  # Represents the currently loaded case
-    self.caseCount = 0
-    self.currentIdx = -1
+    self.caseCount = 0  # Counter equalling the total number of cases
+    self.currentIdx = -1  # Current case index (starts at 0 for fist case, -1 means nothing loaded)
 
     # These variables hold connections to other parts of Slicer, such as registered keyboard shortcuts and
     # Event observers
@@ -258,6 +258,9 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     # Connect buttons to functions
     #
 
+    self.batchTableSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.onChangeTable)
+
+    self.loadBatchButton.connect('clicked(bool)', self.onLoadBatch)
     self.previousButton.connect('clicked(bool)', self.onPrevious)
     self.nextButton.connect('clicked(bool)', self.onNext)
     self.resetButton.connect('clicked(bool)', self.onReset)
@@ -265,14 +268,22 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self._setGUIstate(csv_loaded=False)
 
   def cleanup(self):
-    if self.cases is not None:
+    if self.currentIdx >= 0:
       self._setGUIstate(csv_loaded=False)  # Reset the GUI to ensure observers and shortcuts are removed
       self.currentCase = None
-      self.cases = None
+      self.caseColumns = None
       self.currentIdx = -1
 
+  def onLoadBatch(self):
+    if os.path.isfile(self.inputPathSelector.currentPath):
+      logic = slicer.modules.tables.logic()
+      newTable = logic.AddTable(self.inputPathSelector.currentPath)  # 2nd argument (string) can set the table name
+      self.batchTableSelector.setCurrentNode(newTable)
+      self.batchTableView.setMRMLTableNode(newTable)
+      self.csv_dir = os.path.dirname(self.inputPathSelector.currentPath)
+
   def onReset(self):
-    if self.cases is None:
+    if self.currentIdx < 0:
       # Lock GUI during loading
       self.previousButton.enabled = False
       self.nextButton.enabled = False
@@ -280,22 +291,26 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.nextButton.text = 'Loading...'
 
       self.logger.info('Loading %s...' % self.inputPathSelector.currentPath)
-      if self._loadBatch(self.inputPathSelector.currentPath, start=self.npStart.value):
+      if self._startBatch(start=self.npStart.value):
         self.loadCase(0)  # Load the currently selected case
     else:
       self._setGUIstate(csv_loaded=False)
       self.currentCase = None
-      self.cases = None
+      self.caseColumns = None
       self.currentIdx = -1
 
+  def onChangeTable(self):
+    self.resetButton.enabled = (self.batchTableSelector.currentNodeID != '')
+    self.batchTableView.setMRMLTableNode(self.batchTableSelector.currentNode())
+
   def onPrevious(self):
-    if self.cases is None:
+    if self.currentIdx < 0:
       return
 
     self.loadCase(-1)
 
   def onNext(self):
-    if self.cases is None:
+    if self.currentIdx < 0:
       return
 
     self.loadCase(1)
@@ -312,7 +327,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     If the last case was loaded, the generator will raise an StopIteration exception, which is handled by this function
     and used to reset the GUI to allow for loading a new batch of cases.
     """
-    if self.cases is None:
+    if self.currentIdx < 0:
       return
 
     if self.currentIdx + idx_change < 0:
@@ -333,7 +348,6 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.currentIdx += idx_change
     if self.currentIdx >= self.caseCount:
       self._setGUIstate(csv_loaded=False)
-      self.cases = None
       self.currentIdx = -1
       self.logger.info('########## All Done! ##########')
       return
@@ -344,23 +358,36 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.resetButton.enabled = False
     self.nextButton.text = 'Loading...'
 
-    newCase = self.cases[self.currentIdx]
+    patient = None
+    if 'patient' in self.caseColumns:
+      patient = self.caseColumns['patient'].GetValue(self.currentIdx)
 
-    patient = newCase.get('patient', None)
     if patient is None:
       self.logger.info('Loading next patient (%d/%d)...', self.currentIdx + 1, self.caseCount)
     else:
       self.logger.info('Loading next patient (%d/%d): %s...', self.currentIdx + 1, self.caseCount, patient)
+
     settings = {}
-    settings['root'] = self.rootSelector.text
-    settings['image'] = self.imageSelector.text
-    settings['mask'] = self.maskSelector.text
-    settings['addIms'] = [im.strip() for im in str(self.addImsSelector.text).split(',')]
-    settings['addMas'] = [ma.strip() for ma in str(self.addMasksSelector.text).split(',')]
+
+    root = self._getColumnValue('root')  # Root specified in the batch table? If not, None is returned
+    if root is None and self.rootSelector.text != '':
+      root = self.rootSelector.text  # Root specified as a path
+    if root is not None:
+      settings['root'] = root
+
+    image = self._getColumnValue('image')
+    mask = self._getColumnValue('mask')
+    addIms = self._getColumnValue('addIms', True)
+    if addIms is not None:
+      settings['addIms'] = addIms
+    addMas = self._getColumnValue('addMas', True)
+    if addMas is not None:
+      settings['addMas'] = addMas
+
     settings['csv_dir'] = self.csv_dir
     settings['redirect'] = (self.chkAutoRedirect.checked == 1)
 
-    self.currentCase = SlicerBatchLogic(newCase, **settings)
+    self.currentCase = SlicerBatchLogic(image, mask, **settings)
 
     # Unlock GUI
     self.previousButton.enabled = True
@@ -368,47 +395,72 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     self.resetButton.enabled = True
     self.nextButton.text = 'Next Case'
 
-  def _loadBatch(self, csv_file, start=1):
-    """
-    This function reads the provided CSV file (after checking it exists) and returns a generator to iterate over
-    the cases, starting at the specified start position. If cases are loaded successfully, but no cases are available
-    to iterate over (less cases than specified start position), an empty generator will be returned. This is a valid
-    generator, but will raise the StopIteration exception on the first call to ``next()``.
+  def _getColumnValue(self, colName, is_list=False):
+    if colName not in self.caseColumns:
+      return None
 
-    :param csv_file: Path to the csv file containing the cases. If the file doesn't exist, an empty generator is
-      returned.
-    :param start: Position to start the iteration at. Start = 1 (default) starts iteration at first case.
-    :return: True if successfully loaded some cases, False otherwise
-    """
-    if not os.path.isfile(csv_file):
-      self.logger.warning('Your input does not exist. Try again...')
-      return False
+    if is_list:
+      return [col.GetValue(self.currentIdx) for col in self.caseColumns[colName]]
+    else:
+      return self.caseColumns[colName].GetValue(self.currentIdx)
 
-    # Load cases
-    self.cases = []
-    try:
-      with open(csv_file) as open_csv_file:
-        self.logger.info('Reading File')
-        csv_reader = csv.DictReader(open_csv_file)
-        for row in csv_reader:
-          self.cases.append(row)
-      self.csv_dir = os.path.dirname(csv_file)
-      self.logger.info('file loaded, %d cases' % len(self.cases))
-    except:
-      self.logger.error('DOH!! something went wrong!', exc_info=True)
-      self.cases = None
-      return False
+  def _startBatch(self, start=1):
+
+    self.caseColumns = {}
+    batchTable = self.batchTableSelector.currentNode().GetTable()
+
+    self.caseCount = batchTable.GetNumberOfRows()
 
     # Return generator to iterate over all cases
-    if len(self.cases) < start:
-      self.logger.warning('No cases to process (%d cases, start %d)', len(self.cases), start)
-      self.cases = None
+    if self.caseCount < start:
+      self.logger.warning('No cases to process (%d cases, start %d)', self.caseCount, start)
       return False
 
+    if self.rootSelector.text != '':
+      rootColumn = batchTable.GetColumnByName(self.rootSelector.text)
+      if rootColumn is not None:
+        self.caseColumns['root'] = rootColumn
+      else:
+        self.logger.warning('Unable to find column %s', self.rootSelector.text)
+
+    if self.imageSelector.text != '':
+      imageColumn = batchTable.GetColumnByName(self.imageSelector.text)
+      if imageColumn is not None:
+        self.caseColumns['image'] = imageColumn
+      else:
+        self.logger.warning('Unable to find column %s', self.imageSelector.text)
+    if self.maskSelector.text != '':
+      maskColumn = batchTable.GetColumnByName(self.maskSelector.text)
+      if maskColumn is not None:
+        self.caseColumns['mask'] = maskColumn
+      else:
+        self.logger.warning('Unable to find column %s', self.imageSelector.text)
+
+    if self.addImsSelector.text != '':
+      addIms = []
+      for addIm in str(self.addImsSelector.text).split(','):
+        addImColumn = batchTable.GetColumnByName(addIm.strip())
+        if addImColumn is not None:
+          addIms.append(addImColumn)
+        else:
+          self.logger.warning('Unable to find column %s', addIm)
+      if len(addIms) > 0:
+        self.caseColumns['addIms'] = addIms
+
+    if self.addMasksSelector.text != '':
+      addMas = []
+      for addMa in str(self.addMasksSelector.text).split(','):
+        addMaColumn = batchTable.GetColumnByName(addMa.strip())
+        if addMaColumn is not None:
+          addMas.append(addMaColumn)
+        else:
+          self.logger.warning('Unable to find column %s', addMa)
+      if len(addMas) > 0:
+        self.caseColumns['addMas'] = addMas
+
     self._setGUIstate()
-    self.caseCount = len(self.cases)
     self.currentIdx = start - 1
-    print('starting at case %d' % start)
+
     return True
 
   def _setGUIstate(self, csv_loaded=True):
@@ -442,7 +494,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
         self.logger.warning('Event observer already initialized!')
     else:
       # reset Button is locked when loading cases, ensure it is unlocked to load new batch
-      self.resetButton.enabled = True
+      self.resetButton.enabled = (self.batchTableSelector.currentNodeID != '')
       self.resetButton.text = 'Start Batch'
 
       # Remove the keyboard shortcut
@@ -480,30 +532,25 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  def __init__(self, newCase, **kwargs):
+  def __init__(self, image, mask, **kwargs):
     self.logger = logging.getLogger('slicerbatch')
-
-    self.case = newCase
 
     root = kwargs.get('root', None)
     csv_dir = kwargs.get('csv_dir', None)
-    self.root = None
-    if root is not None:  # Root is specified as a directory
-      if os.path.isdir(root):
-        self.root = root
-      elif root in self.case:  # Root points to a column in csv file
-        if os.path.isabs(self.case[root]):  # Absolute path, use as it is
-          self.root = self.case[root]
-        elif csv_dir is not None:  # If it is a relative path, assume it is relative to the csv file location
-          self.root = os.path.join(csv_dir, self.case[root])
 
-        if not os.path.isdir(self.root):
-          self.root = None
+    self.root = None
+    if root is not None and os.path.isdir(root):  # Root is specified as a directory
+      if os.path.isabs(root):  # Absolute path, use as it is
+        self.root = root
+      elif csv_dir is not None:  # If it is a relative path, assume it is relative to the csv file location
+        self.root = os.path.join(csv_dir, root)
+    elif csv_dir is not None and os.path.isdir(csv_dir):
+      self.root = csv_dir
 
     self.addIms = kwargs.get('addIms', [])
     self.addMas = kwargs.get('addMas', [])
-    self.image = kwargs.get('image', None)
-    self.mask = kwargs.get('mask', None)
+    self.image = image
+    self.mask = mask
 
     self.GenerateMasks = kwargs.get('GenerateMasks', True)
     self.GenerateAddMasks = kwargs.get('GenerateAddMasks', True)
@@ -535,20 +582,26 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
 
     im_filepath = None
     for im in self.addIms:
+      # Check if an image is specified
       if im == '':
+        self.logger.warning('Empty path detected while loading volumes, skipping...')
         continue
-      if im not in self.case:
-        self.logger.warning('%s not found in this case, skipping...', im)
-        continue
-      if self.case[im] == '':
-        continue
-      im_filepath = os.path.join(self.root, self.case[im])
+      # Check if the path is absolute, else build a path relative from the root
+      if os.path.isabs(im):
+        im_filepath = im
+      else:
+        im_filepath = os.path.join(self.root, im)
+      # Check if the file actually exists
       if not os.path.isfile(im_filepath):
-        self.logger.warning('image file for %s does not exist, skipping...', im)
+        self.logger.warning('Volume file %s does not exist, skipping...', im)
+
+      # Try to load the file
       load_success, im_node = slicer.util.loadVolume(im_filepath, returnNode=True)
       if not load_success:
         self.logger.warning('Failed to load ' + im_filepath)
         continue
+
+      # Use the file basename as the name for the loaded volume
       im_node.SetName(os.path.splitext(os.path.basename(im_filepath))[0])
       if im_node is not None:
         self.image_nodes[im] = im_node
@@ -556,20 +609,26 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     self.logger.debug('Loaded %d image(s)' % len(self.image_nodes))
 
     for ma in self.addMas:
+      # Check if the mask is specified
       if ma == '':
+        self.logger.warning('Empty path detected while loading label volumes, skipping...')
         continue
-      if ma not in self.case:
-        self.logger.warning('%s not found in this case, skipping...', ma)
-        continue
-      if self.case[ma] == '':
-        continue
-      ma_filepath = os.path.join(self.root, self.case[ma])
+
+      # Check if the path is absolute, else build a path relative to the root
+      if os.path.isabs(ma):
+        ma_filepath = ma
+      else:
+        ma_filepath = os.path.join(self.root, self.case[ma])
+
+      # Check if the file actually exists
       if not os.path.isfile(ma_filepath):
-        self.logger.warning('image file for %s does not exist, skipping...', ma)
+        self.logger.warning('Label volume file %s does not exist, skipping...', ma)
+      # Try to load the mask
       load_success, ma_node = slicer.util.loadLabelVolume(ma_filepath, returnNode=True)
       if not load_success:
         self.logger.warning('Failed to load ' + ma_filepath)
         continue
+      # Use the file basename as the name for the newly loaded LabelVolumeNode
       ma_node.SetName(os.path.splitext(os.path.basename(ma_filepath))[0])
       if ma_node is not None:
         self.mask_nodes[ma] = ma_node
@@ -577,9 +636,13 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
     self.logger.debug('Loaded %d mask(s)' % len(self.mask_nodes))
 
     if len(self.image_nodes) > 0:
-      self.image_root = os.path.dirname(im_filepath)  # store the directory of the last loaded image (main image)
+      # Store the directory of the last loaded image (main image).
+      # This will be the directory where any output is saved
+      self.image_root = os.path.dirname(im_filepath)
       self._rotateToVolumePlanes(self.image_nodes.values()[-1])
 
+    # If more than 1 image is loaded, set the next-to-last loaded image (i.e. the last 'additional image' as the
+    # ForegroundVolume in all three slice viewers.
     if len(self.image_nodes) > 1:
       slicer.app.layoutManager().sliceWidget('Red').sliceLogic().GetSliceCompositeNode().SetForegroundVolumeID(
         self.image_nodes.values()[-2].GetID())
