@@ -1,15 +1,15 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(SlicerBatch)
+project(SlicerCaseIterator)
 
 #-----------------------------------------------------------------------------
 # Extension meta-information
-set(EXTENSION_HOMEPAGE "http://slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/SlicerBatch")
-set(EXTENSION_CATEGORY "Examples")
+set(EXTENSION_HOMEPAGE "http://slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/CaseIterator")
+set(EXTENSION_CATEGORY "Utilities")
 set(EXTENSION_CONTRIBUTORS "Joost van Griethuysen (AVL-NKI)")
-set(EXTENSION_DESCRIPTION "This is a scripted loadable module to process a batch of images for segmentation.")
-set(EXTENSION_ICONURL "http://www.example.com/Slicer/Extensions/SlicerBatch.png")
-set(EXTENSION_SCREENSHOTURLS "http://www.example.com/Slicer/Extensions/SlicerBatch/Screenshots/1.png")
+set(EXTENSION_DESCRIPTION "This is a scripted loadable module to iterate over a batch of images (with/without prior labelmaps) for segmentation or review.")
+set(EXTENSION_ICONURL "https://raw.githubusercontent.com/JoostJM/SlicerCaseIterator/master/SlicerCaseIterator.png")
+set(EXTENSION_SCREENSHOTURLS "https://raw.githubusercontent.com/JoostJM/SlicerCaseIterator/master/SlicerCaseIterator-Screenshot.png")
 set(EXTENSION_DEPENDS "NA") # Specified as a space separated string, a list or 'NA' if any
 
 #-----------------------------------------------------------------------------
@@ -19,7 +19,7 @@ include(${Slicer_USE_FILE})
 
 #-----------------------------------------------------------------------------
 # Extension modules
-add_subdirectory(SlicerBatch)
+add_subdirectory(SlicerCaseIterator)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------

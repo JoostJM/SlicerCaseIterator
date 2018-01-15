@@ -23,31 +23,31 @@ from slicer.ScriptedLoadableModule import *
 
 
 #
-# SlicerBatch
+# SlicerCaseIterator
 #
 
-class SlicerBatch(ScriptedLoadableModule):
+class SlicerCaseIterator(ScriptedLoadableModule):
   """Uses ScriptedLoadableModule base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
   def __init__(self, parent):
     ScriptedLoadableModule.__init__(self, parent)
-    self.parent.title = 'SlicerBatch'
+    self.parent.title = 'Case Iterator'
     self.parent.categories = ['Utilities']
     self.parent.dependencies = []
     self.parent.contributors = ["Joost van Griethuysen (AVL-NKI)"]
     self.parent.helpText = """
-    This is a scripted loadable module to process a batch of images for segmentation.
+    This is a scripted loadable module to iterate over a batch of images (with/without prior labelmaps) for segmentation or review.
     """
     self.parent.acknowledgementText = ""
 
 
 #
-# SlicerBatchWidget
+# SlicerCaseIteratorWidget
 #
 
-class SlicerBatchWidget(ScriptedLoadableModuleWidget):
+class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
   """Uses ScriptedLoadableModuleWidget base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
@@ -64,7 +64,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     ScriptedLoadableModuleWidget.setup(self)
 
     # Setup a logger for the extension log messages
-    self.logger = logging.getLogger('slicerBatch')
+    self.logger = logging.getLogger('SlicerCaseIterator')
 
     # Instantiate some variables used during iteration
     self.csv_dir = None  # Directory containing the file specifying the cases, needed when using relative paths
@@ -392,7 +392,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     settings['csv_dir'] = self.csv_dir
     settings['redirect'] = (self.chkAutoRedirect.checked == 1)
 
-    self.currentCase = SlicerBatchLogic(image, mask, **settings)
+    self.currentCase = SlicerCaseIteratorLogic(image, mask, **settings)
 
     # Unlock GUI
     self.previousButton.enabled = True
@@ -531,10 +531,10 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
 
 
 #
-# SlicerBatchLogic
+# SlicerCaseIteratorLogic
 #
 
-class SlicerBatchLogic(ScriptedLoadableModuleLogic):
+class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
   """This class should implement all the actual
   computation done by your module.  The interface
   should be such that other python code can import
@@ -545,7 +545,7 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
   """
 
   def __init__(self, image, mask, **kwargs):
-    self.logger = logging.getLogger('slicerbatch')
+    self.logger = logging.getLogger('SlicerCaseIterator')
 
     root = kwargs.get('root', None)
     csv_dir = kwargs.get('csv_dir', None)

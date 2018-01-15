@@ -1,4 +1,4 @@
-Copyright 2017 Het Nederlands Kanker Instituut - Antoni van Leeuwenhoek
+Copyright 2017 Joost van Griethuysen
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 following conditions are met:

@@ -1,13 +1,13 @@
-# SlicerBatch
+# SlicerCaseIterator
 
-SlicerBatch is a scripted module extension for 3D slicer. 
+SlicerCaseIterator is a scripted module extension for 3D slicer. 
 It's purpose is to streamline the segmentation of image datasets by handling
 loading and saving.
 
 ## Usage
 
 ### Input Data
-The input for SlicerBatch is a csv-file containing the file locations of the images
+The input for SlicerCaseIterator is a csv-file containing the file locations of the images
 and/or labelmaps that have to be segmented. The first row should be a header row, with
 each subsequent row representing one case.
 
@@ -40,7 +40,7 @@ which exits the navigation (the case is not saved and not closed).
 
 ### Console Output
 
-On the python console SlicerBatch prints information about the current case.
+On the python console SlicerCaseIterator prints information about the current case.
 Output can contain the following:
 - The case number that is loaded. If the table contains a column `patient` or `ID`, the value
   of this cell for the current row is added to this message, e.g. `Loading next patient (3/5): breast1...` 
@@ -63,16 +63,8 @@ The following customization is available when processing a batch of cases:
 - `Save loaded masks`: Check this to enable resaving of any labelmaps that were specified in the
   input file and loaded (with the optional change in filename).
 - `Save new masks`: Check this to enable saving of any newly added labelmaps and/or labelmaps that
-  were not loaded by SlicerBatch. Again, with to optional suffix specified in `Reader name`.
+  were not loaded by SlicerCaseIterator. Again, with to optional suffix specified in `Reader name`.
   
-When both `Save loaded masks` and `Save new masks` are unchecked, nothing is saved, and SlicerBatch will
+When both `Save loaded masks` and `Save new masks` are unchecked, nothing is saved, and SlicerCaseIterator will
 only show you the cases. **N.B. any newly added labelmaps and changes are discarded when the user switches
 to a different case!**
-
-## WIP
-
-There is still some construction work underway for SlicerBatch...
-
-Coming up:
-- Add some more extensive documentation
-- Change the icon
