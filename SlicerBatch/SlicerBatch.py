@@ -68,6 +68,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
 
     # Instantiate some variables used during iteration
     self.csv_dir = None  # Directory containing the file specifying the cases, needed when using relative paths
+    self.tableNode = None
     self.caseColumns = None  # Dictionary holding the specified (and found) columns from the batchTable
     self.currentCase = None  # Represents the currently loaded case
     self.caseCount = 0  # Counter equalling the total number of cases
@@ -319,6 +320,10 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     if self.currentCase is not None:
       self.currentCase = None
       self.logger.info('case closed')
+    if self.tableNode is not None:
+      slicer.mrmlScene.AddNode(self.tableNode)
+      self.batchTableSelector.setCurrentNode(self.tableNode)
+      self.batchTableView.setMRMLTableNode(self.tableNode)
 
   def loadCase(self, idx_change):
     """
@@ -349,6 +354,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     if self.currentIdx >= self.caseCount:
       self._setGUIstate(csv_loaded=False)
       self.currentIdx = -1
+      self.tableNode = None
       self.logger.info('########## All Done! ##########')
       return
 
@@ -407,6 +413,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
   def _startBatch(self, start=1):
 
     self.caseColumns = {}
+    self.tableNode = self.batchTableSelector.currentNode()
     batchTable = self.batchTableSelector.currentNode().GetTable()
 
     self.caseCount = batchTable.GetNumberOfRows()
@@ -618,7 +625,7 @@ class SlicerBatchLogic(ScriptedLoadableModuleLogic):
       if os.path.isabs(ma):
         ma_filepath = ma
       else:
-        ma_filepath = os.path.join(self.root, self.case[ma])
+        ma_filepath = os.path.join(self.root, ma)
 
       # Check if the file actually exists
       if not os.path.isfile(ma_filepath):
