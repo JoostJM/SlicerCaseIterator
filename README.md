@@ -38,6 +38,16 @@ and a message indicating the batch is done is shown (navigation is then disabled
 Exiting the navigation prior to reaching is possible using the `Reset` button,
 which exits the navigation (the case is not saved and not closed).
 
+### Console Output
+
+On the python console SlicerBatch prints information about the current case.
+Output can contain the following:
+- The case number that is loaded. If the table contains a column `patient` or `ID`, the value
+  of this cell for the current row is added to this message, e.g. `Loading next patient (3/5): breast1...` 
+- An info messages when the case is closed.
+- For each new file that is saved, the full path location of the new file is printed.
+- Errors and warnings about invalid or missing input.
+
 ### Invalid input
 
 When the input is invalid (e.g. unknown column, incorrect path), error messages
@@ -64,6 +74,5 @@ to a different case!**
 There is still some construction work underway for SlicerBatch...
 
 Coming up:
-- Use a table node to load/show/edit the input file prior to starting the batch.
 - Add some more extensive documentation
 - Change the icon

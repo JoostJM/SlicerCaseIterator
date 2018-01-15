@@ -277,6 +277,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
 
   def onLoadBatch(self):
     if os.path.isfile(self.inputPathSelector.currentPath):
+      self.logger.info('Loading %s...' % self.inputPathSelector.currentPath)
       logic = slicer.modules.tables.logic()
       newTable = logic.AddTable(self.inputPathSelector.currentPath)  # 2nd argument (string) can set the table name
       self.batchTableSelector.setCurrentNode(newTable)
@@ -291,7 +292,6 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.resetButton.enabled = False
       self.nextButton.text = 'Loading...'
 
-      self.logger.info('Loading %s...' % self.inputPathSelector.currentPath)
       if self._startBatch(start=self.npStart.value):
         self.loadCase(0)  # Load the currently selected case
     else:
@@ -329,8 +329,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
     """
     If a batch of cases is loaded, this function proceeds to the next case. If a current case is open, it is saved
     and closed. Next, a new case is obtained from the generator, which is then loaded as the new ``currentCase``.
-    If the last case was loaded, the generator will raise an StopIteration exception, which is handled by this function
-    and used to reset the GUI to allow for loading a new batch of cases.
+    If the last case was loaded, the iterator exits and resets the GUI to allow for loading a new batch of cases.
     """
     if self.currentIdx < 0:
       return
@@ -423,6 +422,12 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       self.logger.warning('No cases to process (%d cases, start %d)', self.caseCount, start)
       return False
 
+    patientColumn = batchTable.GetColumnByName('patient')
+    if patientColumn is None:
+      patientColumn = batchTable.GetColumnByName('ID')
+    if patientColumn is not None:
+      self.caseColumns['patient'] = patientColumn
+
     if self.rootSelector.text != '':
       rootColumn = batchTable.GetColumnByName(self.rootSelector.text)
       if rootColumn is not None:
@@ -441,7 +446,7 @@ class SlicerBatchWidget(ScriptedLoadableModuleWidget):
       if maskColumn is not None:
         self.caseColumns['mask'] = maskColumn
       else:
-        self.logger.warning('Unable to find column %s', self.imageSelector.text)
+        self.logger.warning('Unable to find column %s', self.maskSelector.text)
 
     if self.addImsSelector.text != '':
       addIms = []
