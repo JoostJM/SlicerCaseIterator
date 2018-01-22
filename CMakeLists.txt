@@ -4,7 +4,7 @@ project(SlicerCaseIterator)
 
 #-----------------------------------------------------------------------------
 # Extension meta-information
-set(EXTENSION_HOMEPAGE "http://slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/CaseIterator")
+set(EXTENSION_HOMEPAGE "http://slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/SlicerCaseIterator")
 set(EXTENSION_CATEGORY "Utilities")
 set(EXTENSION_CONTRIBUTORS "Joost van Griethuysen (AVL-NKI)")
 set(EXTENSION_DESCRIPTION "This is a scripted loadable module to iterate over a batch of images (with/without prior labelmaps) for segmentation or review.")
