@@ -40,7 +40,7 @@ class SlicerCaseIterator(ScriptedLoadableModule):
     self.parent.helpText = """
     This is a scripted loadable module to iterate over a batch of images (with/without prior labelmaps) for segmentation or review.
     """
-    self.parent.acknowledgementText = ""
+    self.parent.acknowledgementText = "This work is covered by the 3-clause BSD License. No funding was received for this work."
 
 
 #
