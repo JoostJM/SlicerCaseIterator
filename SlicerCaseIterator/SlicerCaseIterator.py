@@ -192,7 +192,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Output parameters GroupBox
     #
 
-    self.outputParametersGroupBox = qt.QGroupBox('Output')
+    self.outputParametersGroupBox = qt.QGroupBox('Output parameters')
     parametersFormLayout.addRow(self.outputParametersGroupBox)
 
     outputParametersFormLayout = qt.QFormLayout(self.outputParametersGroupBox)
@@ -220,7 +220,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     #
     self.chkSaveMasks = qt.QCheckBox()
     self.chkSaveMasks.checked = 0
-    self.chkSaveMasks.toolTip = 'save all intially loaded masks when proceeding to next case'
+    self.chkSaveMasks.toolTip = 'save all initially loaded masks when proceeding to next case'
     outputParametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
 
     #
@@ -236,14 +236,16 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     #
 
     self.previousButton = qt.QPushButton('Previous Case')
-    self.previousButton.visible = False
+    self.previousButton.enabled = False
+    self.previousButton.toolTip = '(Ctrl+P) Press this button to go to the previous case, previous new masks are not reloaded'
     self.layout.addWidget(self.previousButton)
 
     #
     # Load CSV / Next Case
     #
     self.nextButton = qt.QPushButton('Next Case')
-    self.nextButton.visible = False
+    self.nextButton.enabled = False
+    self.nextButton.toolTip = '(Ctrl+N) Press this button to go to the next case'
     self.layout.addWidget(self.nextButton)
 
     #
@@ -526,8 +528,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
         slicer.mrmlScene.RemoveObserver(obs)
       self.observers = []
 
-    self.previousButton.visible = csv_loaded
-    self.nextButton.visible = csv_loaded
+    self.previousButton.enabled = csv_loaded
+    self.nextButton.enabled = csv_loaded
 
     self.inputPathSelector.enabled = not csv_loaded
     self.loadBatchButton.enabled = not csv_loaded
