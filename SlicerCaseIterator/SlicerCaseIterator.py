@@ -282,7 +282,6 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       newTable = logic.AddTable(self.inputPathSelector.currentPath)  # 2nd argument (string) can set the table name
       self.batchTableSelector.setCurrentNode(newTable)
       self.batchTableView.setMRMLTableNode(newTable)
-      self.csv_dir = os.path.dirname(self.inputPathSelector.currentPath)
 
   def onReset(self):
     if self.currentIdx < 0:
@@ -413,6 +412,13 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     self.caseColumns = {}
     self.tableNode = self.batchTableSelector.currentNode()
+
+    # If the table was loaded from a file, get the directory containing the file as reference for relative paths
+    if self.tableNode.GetStorageNode() is not None and self.tableNode.GetStorageNode().GetFileName() is not None:
+      self.csv_dir = os.path.dirname(self.tableNode.GetStorageNode().GetFileName())
+    else:  # Table did not originate from a file
+      self.csv_dir = None
+
     batchTable = self.batchTableSelector.currentNode().GetTable()
 
     self.caseCount = batchTable.GetNumberOfRows()
