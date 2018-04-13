@@ -364,14 +364,11 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.resetButton.enabled = False
     self.nextButton.text = 'Loading...'
 
-    patient = None
     if 'patient' in self.caseColumns:
       patient = self.caseColumns['patient'].GetValue(self.currentIdx)
-
-    if patient is None:
-      self.logger.info('Loading next patient (%d/%d)...', self.currentIdx + 1, self.caseCount)
-    else:
       self.logger.info('Loading next patient (%d/%d): %s...', self.currentIdx + 1, self.caseCount, patient)
+    else:
+      self.logger.info('Loading next patient (%d/%d)...', self.currentIdx + 1, self.caseCount)
 
     settings = {}
 
@@ -559,12 +556,13 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     csv_dir = kwargs.get('csv_dir', None)
 
     self.root = None
-    if root is not None and os.path.isdir(root):  # Root is specified as a directory
-      if os.path.isabs(root):  # Absolute path, use as it is
+    if root is not None:  # Root is specified as a directory
+      if os.path.isabs(root) and os.path.isdir(root):  # Absolute path, use as it is
         self.root = root
-      elif csv_dir is not None:  # If it is a relative path, assume it is relative to the csv file location
+      elif csv_dir is not None and os.path.isdir(os.path.join(csv_dir, root)):  # If it is a relative path, assume it is relative to the csv file location
         self.root = os.path.join(csv_dir, root)
-    elif csv_dir is not None and os.path.isdir(csv_dir):
+
+    if self.root is None and csv_dir is not None and os.path.isdir(csv_dir):
       self.root = csv_dir
 
     self.addIms = kwargs.get('addIms', [])
