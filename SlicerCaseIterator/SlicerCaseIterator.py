@@ -20,10 +20,9 @@ import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
 
-#
+# ------------------------------------------------------------------------------
 # SlicerCaseIterator
-#
-
+# ------------------------------------------------------------------------------
 class SlicerCaseIterator(ScriptedLoadableModule):
   """Uses ScriptedLoadableModule base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
@@ -36,15 +35,14 @@ class SlicerCaseIterator(ScriptedLoadableModule):
     self.parent.dependencies = []
     self.parent.contributors = ["Joost van Griethuysen (AVL-NKI)"]
     self.parent.helpText = """
-    This is a scripted loadable module to iterate over a batch of images (with/without prior labelmaps) for segmentation or review.
+    This is a scripted loadable module to iterate over a batch of images (with/without prior segmentations) for segmentation or review.
     """
     self.parent.acknowledgementText = "This work is covered by the 3-clause BSD License. No funding was received for this work."
 
 
-#
+# ------------------------------------------------------------------------------
 # SlicerCaseIteratorWidget
-#
-
+# ------------------------------------------------------------------------------
 class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
   """Uses ScriptedLoadableModuleWidget base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
@@ -94,7 +92,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     #
     self.inputPathSelector = ctk.ctkPathLineEdit()
     self.inputPathSelector.toolTip = 'Location of the CSV file containing the cases to process'
-    inputDataFormLayout.addRow('input CSV path', self.inputPathSelector)
+    inputDataFormLayout.addRow('Input CSV path', self.inputPathSelector)
 
     self.loadBatchButton = qt.QPushButton('Load Input Data')
     self.loadBatchButton.enabled = False
@@ -143,14 +141,14 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.npStart.maximum = 999999
     self.npStart.value = 1
     self.npStart.toolTip = 'Start position in the CSV file (1 = first patient)'
-    inputParametersFormLayout.addRow('start position', self.npStart)
+    inputParametersFormLayout.addRow('Start position', self.npStart)
 
     #
     # Root Path
     #
     self.rootSelector = qt.QLineEdit()
     self.rootSelector.text = 'path'
-    self.rootSelector.toolTip = 'Location of the root directory to load form, or the column name specifying said' \
+    self.rootSelector.toolTip = 'Location of the root directory to load from, or the column name specifying said ' \
                                 'directory in the input CSV'
     inputParametersFormLayout.addRow('Root Column', self.rootSelector)
 
@@ -200,18 +198,18 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     #
     self.txtReaderName = qt.QLineEdit()
     self.txtReaderName.text = ''
-    self.txtReaderName.toolTip = 'Name of the current reader; if not empty, this name will be added to the filename' \
+    self.txtReaderName.toolTip = 'Name of the current reader; if not empty, this name will be added to the filename ' \
                                  'of saved masks'
     outputParametersFormLayout.addRow('Reader name', self.txtReaderName)
 
     #
-    # Auto-redirect to Editor
+    # Auto-redirect to SegmentEditor
     #
 
     self.chkAutoRedirect = qt.QCheckBox()
     self.chkAutoRedirect.checked = 1
-    self.chkAutoRedirect.toolTip = 'Automatically switch module to "Editor" when each case is loaded'
-    outputParametersFormLayout.addRow('Go to editor', self.chkAutoRedirect)
+    self.chkAutoRedirect.toolTip = 'Automatically switch module to "SegmentEditor" when each case is loaded'
+    outputParametersFormLayout.addRow('Go to Segment Editor', self.chkAutoRedirect)
 
     #
     # Save masks
@@ -268,6 +266,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     self._setGUIstate(csv_loaded=False)
 
+  #------------------------------------------------------------------------------
   def cleanup(self):
     if self.currentIdx >= 0:
       self._setGUIstate(csv_loaded=False)  # Reset the GUI to ensure observers and shortcuts are removed
@@ -275,6 +274,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self.caseColumns = None
       self.currentIdx = -1
 
+  #------------------------------------------------------------------------------
   def onLoadBatch(self):
     if os.path.isfile(self.inputPathSelector.currentPath):
       self.logger.info('Loading %s...' % self.inputPathSelector.currentPath)
@@ -283,6 +283,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self.batchTableSelector.setCurrentNode(newTable)
       self.batchTableView.setMRMLTableNode(newTable)
 
+  #------------------------------------------------------------------------------
   def onReset(self):
     if self.currentIdx < 0:
       # Lock GUI during loading
@@ -299,22 +300,26 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self.caseColumns = None
       self.currentIdx = -1
 
+  #------------------------------------------------------------------------------
   def onChangeTable(self):
     self.resetButton.enabled = (self.batchTableSelector.currentNodeID != '')
     self.batchTableView.setMRMLTableNode(self.batchTableSelector.currentNode())
 
+  #------------------------------------------------------------------------------
   def onPrevious(self):
     if self.currentIdx < 0:
       return
 
     self.loadCase(-1)
 
+  #------------------------------------------------------------------------------
   def onNext(self):
     if self.currentIdx < 0:
       return
 
     self.loadCase(1)
 
+  #------------------------------------------------------------------------------
   def onEndClose(self, caller, event):
     if self.currentCase is not None:
       self.currentCase = None
@@ -324,6 +329,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self.batchTableSelector.setCurrentNode(self.tableNode)
       self.batchTableView.setMRMLTableNode(self.tableNode)
 
+  #------------------------------------------------------------------------------
   def loadCase(self, idx_change):
     """
     If a batch of cases is loaded, this function proceeds to the next case. If a current case is open, it is saved
@@ -396,6 +402,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.resetButton.enabled = True
     self.nextButton.text = 'Next Case'
 
+  #------------------------------------------------------------------------------
   def _getColumnValue(self, colName, is_list=False):
     if colName not in self.caseColumns:
       return None
@@ -405,6 +412,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     else:
       return self.caseColumns[colName].GetValue(self.currentIdx)
 
+  #------------------------------------------------------------------------------
   def _startBatch(self, start=1):
 
     self.caseColumns = {}
@@ -478,6 +486,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     return True
 
+  #------------------------------------------------------------------------------
   def _setGUIstate(self, csv_loaded=True):
     if csv_loaded:
       self.resetButton.text = 'Reset'
@@ -533,10 +542,9 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.inputParametersGroupBox.enabled = not csv_loaded
 
 
-#
+# ------------------------------------------------------------------------------
 # SlicerCaseIteratorLogic
-#
-
+# ------------------------------------------------------------------------------
 class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
   """This class should implement all the actual
   computation done by your module.  The interface
@@ -577,15 +585,16 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     self.mask_nodes = OrderedDict()
 
     # Load images (returns True if loaded correctly) and check redirect:
-    # if redirect = True, switch to Editor module or refresh to ensure user is prompted to add new segementation
+    # if redirect = True, switch to SegmentEditor module or refresh to ensure user is prompted to add new segementation
     if self._loadImages() and self.redirect:
-      if slicer.util.selectedModule() == 'Editor':
-        slicer.modules.EditorWidget.enter()
+      if slicer.util.selectedModule() == 'SegmentEditor':
+        slicer.modules.SegmentEditorWidget.enter()
       else:
-        slicer.util.selectModule('Editor')
+        slicer.util.selectModule('SegmentEditor')
 
     self.logger.debug('Case initialized (settings: %s)' % kwargs)
 
+  #------------------------------------------------------------------------------
   def _loadImages(self):
     if self.root is None:
       self.logger.error('Missing root path, cannot load case!')
@@ -627,7 +636,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     for ma in self.addMas:
       # Check if the mask is specified
       if ma == '':
-        self.logger.warning('Empty path detected while loading label volumes, skipping...')
+        self.logger.warning('Empty path detected while loading segmentations, skipping...')
         continue
 
       # Check if the path is absolute, else build a path relative to the root
@@ -638,13 +647,24 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
       # Check if the file actually exists
       if not os.path.isfile(ma_filepath):
-        self.logger.warning('Label volume file %s does not exist, skipping...', ma)
+        self.logger.warning('Segmentation file %s does not exist, skipping...', ma)
+      # Determine if file is segmentation based on extension
+      isSegmentation = (os.path.splitext(os.path.splitext(ma_filepath)[0]) == 'seg')
       # Try to load the mask
-      load_success, ma_node = slicer.util.loadLabelVolume(ma_filepath, returnNode=True)
+      if isSegmentation:
+        load_success, ma_node = slicer.util.loadSegmentation(ma_filepath, returnNode=True)
+      else:
+        # If not segmentation, then load as labelmap then import as segmentation
+        load_success, ma_node = slicer.util.loadLabelVolume(ma_filepath, returnNode=True)
+        seg_node = slicer.vtkMRMLSegmentationNode()
+        slicer.mrmlScene.AddNode(seg_node)
+        load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node) & load_success
+        slicer.mrmlScene.RemoveNode(ma_node)
+        ma_node = seg_node
       if not load_success:
         self.logger.warning('Failed to load ' + ma_filepath)
         continue
-      # Use the file basename as the name for the newly loaded LabelVolumeNode
+      # Use the file basename as the name for the newly loaded segmentation node
       ma_node.SetName(os.path.splitext(os.path.basename(ma_filepath))[0])
       if ma_node is not None:
         self.mask_nodes[ma] = ma_node
@@ -669,17 +689,17 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
     return True
 
+  #------------------------------------------------------------------------------
   def closeCase(self, save_loaded_masks=False, save_new_masks=False, reader_name=None):
-
-    # Save the results (label maps reviewed or created)
+    # Save the results (segmentations reviewed or created)
     if reader_name == '':
       reader_name = None
 
     loaded_masks = {node.GetName(): node for node in self.mask_nodes.values()}
-    new_masks = {node.GetName(): node for node in slicer.util.getNodesByClass('vtkMRMLLabelMapVolumeNode')
+    new_masks = {node.GetName(): node for node in slicer.util.getNodesByClass('vtkMRMLSegmentationNode')
                  if node.GetName() not in loaded_masks.keys()}
 
-    # If enabled, save label maps
+    # If enabled, save segmentation
     if save_loaded_masks:
       if len(loaded_masks) == 0:
         self.logger.debug('No loaded masks to save...')
@@ -694,24 +714,26 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
         self._saveMasks(new_masks, self.image_root, reader_name)
 
     # Close the scene and start a fresh one
-    if slicer.util.selectedModule() == 'Editor':
-      slicer.modules.EditorWidget.exit()
+    if slicer.util.selectedModule() == 'SegmentEditor':
+      slicer.modules.SegmentEditorWidget.exit()
 
     slicer.mrmlScene.Clear(0)
     node = slicer.vtkMRMLViewNode()
     slicer.mrmlScene.AddNode(node)
 
+  #------------------------------------------------------------------------------
   def _rotateToVolumePlanes(self, referenceVolume):
     sliceNodes = slicer.util.getNodes('vtkMRMLSliceNode*')
     for name, node in sliceNodes.items():
       node.RotateToVolumePlane(referenceVolume)
-    # snap to IJK to try and avoid rounding errors
+    # Snap to IJK to try and avoid rounding errors
     sliceLogics = slicer.app.layoutManager().mrmlSliceLogics()
     numLogics = sliceLogics.GetNumberOfItems()
     for n in range(numLogics):
       l = sliceLogics.GetItemAsObject(n)
       l.SnapSliceOffsetToIJK()
 
+  #------------------------------------------------------------------------------
   def _saveMasks(self, nodes, folder, reader_name=None):
     for nodename, node in nodes.iteritems():
       # Add the readername if set
@@ -720,15 +742,15 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       filename = os.path.join(folder, nodename)
 
       # Prevent overwriting existing files
-      if os.path.exists(filename + '.nrrd'):
+      if os.path.exists(filename + '.seg.nrrd'):
         self.logger.debug('Filename exists! Generating unique name...')
         idx = 1
-        filename += '(%d).nrrd'
+        filename += '(%d).seg.nrrd'
         while os.path.exists(filename % idx):
           idx += 1
         filename = filename % idx
       else:
-        filename += '.nrrd'
+        filename += '.seg.nrrd'
 
       # Save the node
       slicer.util.saveNode(node, filename)
