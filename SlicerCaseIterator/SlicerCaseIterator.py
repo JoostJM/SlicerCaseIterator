@@ -266,6 +266,9 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     self._setGUIstate(csv_loaded=False)
 
+  def enter(self):
+    self.onChangeTable()
+
   #------------------------------------------------------------------------------
   def cleanup(self):
     if self.currentIdx >= 0:
@@ -652,19 +655,30 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       if not os.path.isfile(ma_filepath):
         self.logger.warning('Segmentation file %s does not exist, skipping...', ma)
       # Determine if file is segmentation based on extension
-      isSegmentation = (os.path.splitext(os.path.splitext(ma_filepath)[0]) == 'seg')
+      isSegmentation = (os.path.splitext(os.path.splitext(ma_filepath)[0])[1] == '.seg')
       # Try to load the mask
       if isSegmentation:
         load_success, ma_node = slicer.util.loadSegmentation(ma_filepath, returnNode=True)
       else:
         # If not segmentation, then load as labelmap then import as segmentation
         load_success, ma_node = slicer.util.loadLabelVolume(ma_filepath, returnNode=True)
-        seg_node = slicer.vtkMRMLSegmentationNode()
-        seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_im)
-        slicer.mrmlScene.AddNode(seg_node)
-        load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node) & load_success
-        slicer.mrmlScene.RemoveNode(ma_node)
-        ma_node = seg_node
+        if load_success:
+          # Only try to make a segmentation node if Slicer was able to load the label map
+          seg_node = slicer.vtkMRMLSegmentationNode()
+          seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_im)
+          slicer.mrmlScene.AddNode(seg_node)
+          load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node) & load_success
+          slicer.mrmlScene.RemoveNode(ma_node)
+          ma_node = seg_node
+
+          # Add a storage node for this segmentation node
+          file_base, ext = os.path.splitext(ma_filepath)
+          store_node = seg_node.CreateDefaultStorageNode()
+          store_node.SetFileName('%s.seg%s' % (file_base, ext))
+
+          slicer.mrmlScene.AddNode(store_node)
+          seg_node.SetAndObserveStorageNodeID(store_node.GetID())
+
       if not load_success:
         self.logger.warning('Failed to load ' + ma_filepath)
         continue
@@ -740,10 +754,16 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
   #------------------------------------------------------------------------------
   def _saveMasks(self, nodes, folder, reader_name=None):
     for nodename, node in nodes.iteritems():
+      target_dir = folder
+      storage_node = node.GetStorageNode()
+      if storage_node is not None:
+        # mask was loaded, save the updated mask in the same directory
+        target_dir = os.path.dirname(storage_node.GetFileName())
+
       # Add the readername if set
       if reader_name is not None:
         nodename += '_' + reader_name
-      filename = os.path.join(folder, nodename)
+      filename = os.path.join(target_dir, nodename)
 
       # Prevent overwriting existing files
       if os.path.exists(filename + '.seg.nrrd'):
