@@ -390,7 +390,11 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
           timing_clm.SetValue(self.currentIdx, str(self.time_delta))
           self.logger.info('This case took %s', self.time_delta)
 
-          # TODO: Save the table
+          if self.timingSelector.currentIndex > 1:
+            # Store the results!
+            table_storage = self.tableNode.GetStorageNode()
+            if table_storage is not None:
+              slicer.util.saveNode(self.tableNode, table_storage.GetFileName())
 
       self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
                                  save_new_masks=(self.chkSaveNewMasks.checked == 1),
@@ -451,8 +455,11 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     if self.timingSelector.currentIndex > 0:
       # Reset the timer
       self.time_delta = datetime.timedelta()
-      self.time_start = datetime.datetime.now()
-      self.logger.info('Timer started!')
+
+      # Check if the timer is paused. If not, start the timer
+      if self.timingButton.text == 'Pause Timing':
+        self.time_start = datetime.datetime.now()
+        self.logger.info('Timer started!')
 
   #------------------------------------------------------------------------------
   def _getColumnValue(self, colName, is_list=False):
