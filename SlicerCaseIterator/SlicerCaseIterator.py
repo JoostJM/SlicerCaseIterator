@@ -605,6 +605,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     if self.mask is not None:
       self.addMas.append(self.mask)
 
+    ref_im = None
     im_filepath = None
     for im in self.addIms:
       # Check if an image is specified
@@ -630,6 +631,8 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       im_node.SetName(os.path.splitext(os.path.basename(im_filepath))[0])
       if im_node is not None:
         self.image_nodes[im] = im_node
+        if im == self.image:
+          ref_im = im_node
 
     self.logger.debug('Loaded %d image(s)' % len(self.image_nodes))
 
@@ -657,6 +660,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
         # If not segmentation, then load as labelmap then import as segmentation
         load_success, ma_node = slicer.util.loadLabelVolume(ma_filepath, returnNode=True)
         seg_node = slicer.vtkMRMLSegmentationNode()
+        seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_im)
         slicer.mrmlScene.AddNode(seg_node)
         load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node) & load_success
         slicer.mrmlScene.RemoveNode(ma_node)
