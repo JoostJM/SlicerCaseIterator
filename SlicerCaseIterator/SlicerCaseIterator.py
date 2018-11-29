@@ -11,8 +11,8 @@
 #  limitations under the License.
 # ========================================================================
 
-import csv
 from collections import OrderedDict
+import datetime
 import logging
 import os
 
@@ -74,6 +74,10 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Event observers
     self.shortcuts = []
     self.observers = []
+
+    # Some variables to track how long the user needs for the current case
+    self.time_delta = None
+    self.time_start = None
 
     # Instantiate and connect widgets ...
 
@@ -227,6 +231,11 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
     outputParametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
 
+    self.timingSelector = qt.QComboBox()
+    self.timingSelector.addItems(['No Timing', 'Keep Time, auto-save OFF', 'Keep Time, auto-save ON'])
+    self.timingSelector.toolTip = 'Optionally track the time required per case, stored in column "timing_<reader>"'
+    outputParametersFormLayout.addRow('Keep time', self.timingSelector)
+
     #
     # Previous Case
     #
@@ -251,6 +260,14 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.resetButton.enabled = False
     self.layout.addWidget(self.resetButton)
 
+    #
+    # Reset
+    #
+    self.timingButton = qt.QPushButton('Pause Timing')
+    self.timingButton.visible = False
+    self.timingButton.toolTip = '(Ctrl+T) Press this button to pause the timing, press again to resume'
+    self.layout.addWidget(self.timingButton)
+
     self.layout.addStretch(1)
 
     #
@@ -263,6 +280,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.previousButton.connect('clicked(bool)', self.onPrevious)
     self.nextButton.connect('clicked(bool)', self.onNext)
     self.resetButton.connect('clicked(bool)', self.onReset)
+    self.timingButton.connect('clicked(bool)', self.onTimingPause)
 
     self._setGUIstate(csv_loaded=False)
 
@@ -322,6 +340,19 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     self.loadCase(1)
 
+  # ------------------------------------------------------------------------------
+  def onTimingPause(self):
+    is_running = self.timingButton.text == 'Pause Timing'
+    if is_running:
+      self.time_delta += datetime.datetime.now() - self.time_start
+      self.time_start = None
+      self.logger.info('Paused timing')
+      self.timingButton.text = 'Resume Timing'
+    else:
+      self.time_start = datetime.datetime.now()
+      self.logger.info('Resumed timing')
+      self.timingButton.text = 'Pause Timing'
+
   #------------------------------------------------------------------------------
   def onEndClose(self, caller, event):
     if self.currentCase is not None:
@@ -349,6 +380,18 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     # If a case is open, save it and close it before attempting to load a new case
     if self.currentCase is not None:
+      if self.timingSelector.currentIndex > 0:
+        # Timing is enabled, store the timing result
+        if self.time_delta is not None:
+          if self.time_start is not None:
+            # timer active, record time passed
+            self.time_delta += datetime.datetime.now() - self.time_start
+          timing_clm = self.caseColumns['timing']
+          timing_clm.SetValue(self.currentIdx, str(self.time_delta))
+          self.logger.info('This case took %s', self.time_delta)
+
+          # TODO: Save the table
+
       self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
                                  save_new_masks=(self.chkSaveNewMasks.checked == 1),
                                  reader_name=self.txtReaderName.text)
@@ -405,6 +448,12 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.resetButton.enabled = True
     self.nextButton.text = 'Next Case'
 
+    if self.timingSelector.currentIndex > 0:
+      # Reset the timer
+      self.time_delta = datetime.timedelta()
+      self.time_start = datetime.datetime.now()
+      self.logger.info('Timer started!')
+
   #------------------------------------------------------------------------------
   def _getColumnValue(self, colName, is_list=False):
     if colName not in self.caseColumns:
@@ -427,7 +476,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     else:  # Table did not originate from a file
       self.csv_dir = None
 
-    batchTable = self.batchTableSelector.currentNode().GetTable()
+    batchTable = self.tableNode.GetTable()
 
     self.caseCount = batchTable.GetNumberOfRows()
 
@@ -484,6 +533,15 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       if len(addMas) > 0:
         self.caseColumns['addMas'] = addMas
 
+    if self.timingSelector.currentIndex > 0:
+      # Timing is enabled!
+      time_clmName = 'timing_' + self.txtReaderName.text
+      timing_clm = batchTable.GetColumnByName(time_clmName)
+      if timing_clm is None:
+        timing_clm = self.tableNode.AddColumn()
+        timing_clm.SetName(time_clmName)
+      self.caseColumns['timing'] = timing_clm
+
     self._setGUIstate()
     self.currentIdx = start - 1
 
@@ -511,6 +569,12 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
         shortcutPrevious.connect('activated()', self.onPrevious)
         self.shortcuts.append(shortcutPrevious)
+
+        shortcutPause = qt.QShortcut(slicer.util.mainWindow())
+        shortcutPause.setKey(qt.QKeySequence('Ctrl+T'))
+
+        shortcutPause.connect('activated()', self.onTimingPause)
+        self.shortcuts.append(shortcutPause)
       else:
         self.logger.warning('Shortcuts already initialized!')
 
@@ -535,8 +599,12 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
         slicer.mrmlScene.RemoveObserver(obs)
       self.observers = []
 
+      # Reset Timing button name
+      self.timingButton.text = 'Pause Timing'
+
     self.previousButton.enabled = csv_loaded
     self.nextButton.enabled = csv_loaded
+    self.timingButton.visible = csv_loaded & (self.timingSelector.currentIndex > 0)
 
     self.inputPathSelector.enabled = not csv_loaded
     self.loadBatchButton.enabled = not csv_loaded
@@ -778,4 +846,4 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
       # Save the node
       slicer.util.saveNode(node, filename)
-      self.logger.info('Saved node %s in %s', nodename, filename)
+      self.logger.info('Saved node %s in %s', nodename, os.path.abspath(filename))
