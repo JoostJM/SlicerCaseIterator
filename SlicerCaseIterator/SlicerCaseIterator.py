@@ -231,10 +231,23 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
     outputParametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
 
-    self.timingSelector = qt.QComboBox()
-    self.timingSelector.addItems(['No Timing', 'Keep Time, auto-save OFF', 'Keep Time, auto-save ON'])
-    self.timingSelector.toolTip = 'Optionally track the time required per case, stored in column "timing_<reader>"'
-    outputParametersFormLayout.addRow('Keep time', self.timingSelector)
+    #
+    # Keep Time
+    #
+    self.chkKeepTime = qt.QCheckBox()
+    self.chkKeepTime.checked = 0
+    self.chkKeepTime.toolTip = 'Measure the amount of time needed to process each case, added to the input table'
+    outputParametersFormLayout.addRow('Keep Time', self.chkKeepTime)
+
+    #
+    # Auto Save
+    #
+
+    self.saveSelector = qt.QComboBox()
+    self.saveSelector.addItems(['auto-save OFF', 'auto-save on each case', 'auto-save on batch finished'])
+    self.saveSelector.toolTip = 'Optionally save the output after each case is done (timing: "timing_<reader>"", ' \
+                                'updated mask: "mask_<reader>")'
+    outputParametersFormLayout.addRow('Auto-save output', self.saveSelector)
 
     #
     # Previous Case
@@ -363,6 +376,18 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self.batchTableSelector.setCurrentNode(self.tableNode)
       self.batchTableView.setMRMLTableNode(self.tableNode)
 
+  # ------------------------------------------------------------------------------
+  def saveTable(self):
+    if not ('mask_out' in self.caseColumns or 'timing' in self.caseColumns):
+      # No output is added to the table, so don't re-save the table
+      return
+
+    # Store the results!
+    table_storage = self.tableNode.GetStorageNode()
+    if table_storage is not None:
+      self.logger.info('Storing table at %s', table_storage.GetFileName())
+      slicer.util.saveNode(self.tableNode, table_storage.GetFileName())
+
   #------------------------------------------------------------------------------
   def loadCase(self, idx_change):
     """
@@ -380,7 +405,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     # If a case is open, save it and close it before attempting to load a new case
     if self.currentCase is not None:
-      if self.timingSelector.currentIndex > 0:
+      if self.chkKeepTime.checked:
         # Timing is enabled, store the timing result
         if self.time_delta is not None:
           if self.time_start is not None:
@@ -390,15 +415,14 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
           timing_clm.SetValue(self.currentIdx, str(self.time_delta))
           self.logger.info('This case took %s', self.time_delta)
 
-          if self.timingSelector.currentIndex > 1:
-            # Store the results!
-            table_storage = self.tableNode.GetStorageNode()
-            if table_storage is not None:
-              slicer.util.saveNode(self.tableNode, table_storage.GetFileName())
+      main_mask = self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
+                                             save_new_masks=(self.chkSaveNewMasks.checked == 1),
+                                             reader_name=self.txtReaderName.text)
+      if 'mask_out' in self.caseColumns and main_mask is not None:
+        self.caseColumns['mask_out'].SetValue(self.currentIdx, main_mask)
 
-      self.currentCase.closeCase(save_loaded_masks=(self.chkSaveMasks.checked == 1),
-                                 save_new_masks=(self.chkSaveNewMasks.checked == 1),
-                                 reader_name=self.txtReaderName.text)
+      if self.saveSelector.currentIndex == 1:
+        self.saveTable()
 
     # Attempt to load a new case. If the current case was the last one, a
     # StopIteration exception will be raised and handled, which resets the
@@ -406,6 +430,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     self.currentIdx += idx_change
     if self.currentIdx >= self.caseCount:
+      if self.saveSelector.currentIndex == 2:
+        self.saveTable()
       self._setGUIstate(csv_loaded=False)
       self.currentIdx = -1
       self.tableNode = None
@@ -434,6 +460,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     image = self._getColumnValue('image')
     mask = self._getColumnValue('mask')
+    settings['mask_out'] = self._getColumnValue('mask_out')
+
     addIms = self._getColumnValue('addIms', True)
     if addIms is not None:
       settings['addIms'] = addIms
@@ -452,7 +480,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.resetButton.enabled = True
     self.nextButton.text = 'Next Case'
 
-    if self.timingSelector.currentIndex > 0:
+    if self.chkKeepTime.checked:
       # Reset the timer
       self.time_delta = datetime.timedelta()
 
@@ -463,7 +491,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
   #------------------------------------------------------------------------------
   def _getColumnValue(self, colName, is_list=False):
-    if colName not in self.caseColumns:
+    if colName not in self.caseColumns or self.caseColumns[colName].GetValue(self.currentIdx) == '':
       return None
 
     if is_list:
@@ -518,6 +546,17 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       else:
         self.logger.warning('Unable to find column %s', self.maskSelector.text)
 
+    # Get or Add column to store generated results
+    mask_out_clm_name = 'mask-out_' + self.txtReaderName.text
+    if mask_out_clm_name == 'mask-out_':
+      mask_out_clm_name = 'mask-out'
+    maskOutColumn = batchTable.GetColumnByName(mask_out_clm_name)
+
+    if maskOutColumn is None:
+      maskOutColumn = self.tableNode.AddColumn()
+      maskOutColumn.SetName(mask_out_clm_name)
+    self.caseColumns['mask_out'] = maskOutColumn
+
     if self.addImsSelector.text != '':
       addIms = []
       for addIm in str(self.addImsSelector.text).split(','):
@@ -540,9 +579,12 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       if len(addMas) > 0:
         self.caseColumns['addMas'] = addMas
 
-    if self.timingSelector.currentIndex > 0:
+    if self.chkKeepTime.checked:
       # Timing is enabled!
       time_clmName = 'timing_' + self.txtReaderName.text
+      if time_clmName == 'timing_':
+        time_clmName = 'timing'
+
       timing_clm = batchTable.GetColumnByName(time_clmName)
       if timing_clm is None:
         timing_clm = self.tableNode.AddColumn()
@@ -577,11 +619,12 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
         shortcutPrevious.connect('activated()', self.onPrevious)
         self.shortcuts.append(shortcutPrevious)
 
-        shortcutPause = qt.QShortcut(slicer.util.mainWindow())
-        shortcutPause.setKey(qt.QKeySequence('Ctrl+T'))
+        if self.chkKeepTime.checked:
+          shortcutPause = qt.QShortcut(slicer.util.mainWindow())
+          shortcutPause.setKey(qt.QKeySequence('Ctrl+T'))
 
-        shortcutPause.connect('activated()', self.onTimingPause)
-        self.shortcuts.append(shortcutPause)
+          shortcutPause.connect('activated()', self.onTimingPause)
+          self.shortcuts.append(shortcutPause)
       else:
         self.logger.warning('Shortcuts already initialized!')
 
@@ -611,7 +654,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     self.previousButton.enabled = csv_loaded
     self.nextButton.enabled = csv_loaded
-    self.timingButton.visible = csv_loaded & (self.timingSelector.currentIndex > 0)
+    self.timingButton.visible = csv_loaded & self.chkKeepTime.checked
 
     self.inputPathSelector.enabled = not csv_loaded
     self.loadBatchButton.enabled = not csv_loaded
@@ -653,6 +696,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     self.addMas = kwargs.get('addMas', [])
     self.image = image
     self.mask = mask
+    self.mask_out = kwargs.get('mask_out')
 
     self.GenerateMasks = kwargs.get('GenerateMasks', True)
     self.GenerateAddMasks = kwargs.get('GenerateAddMasks', True)
@@ -680,8 +724,13 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
     if self.image is not None:
       self.addIms.append(self.image)
+    if self.mask_out is not None:
+      self.addMas.append(self.mask_out)
     if self.mask is not None:
       self.addMas.append(self.mask)
+
+    self.maskNode = None
+    self.maskOutNode = None
 
     ref_im = None
     im_filepath = None
@@ -757,10 +806,19 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       if not load_success:
         self.logger.warning('Failed to load ' + ma_filepath)
         continue
+
       # Use the file basename as the name for the newly loaded segmentation node
-      ma_node.SetName(os.path.splitext(os.path.basename(ma_filepath))[0])
+      file_base = os.path.splitext(os.path.basename(ma_filepath))[0]
+      if isSegmentation:
+        # split off .seg
+        file_base = os.path.splitext(file_base)
+      ma_node.SetName(file_base)
       if ma_node is not None:
         self.mask_nodes[ma] = ma_node
+      if ma == self.mask:
+        self.maskNode = ma_node
+      elif ma == self.mask_out:
+        self.maskOutNode = ma_node
 
     self.logger.debug('Loaded %d mask(s)' % len(self.mask_nodes))
 
@@ -788,6 +846,9 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     if reader_name == '':
       reader_name = None
 
+    # Holds the filename of the updated mask defined by the 'mask' column
+    main_mask = None
+
     loaded_masks = {node.GetName(): node for node in self.mask_nodes.values()}
     new_masks = {node.GetName(): node for node in slicer.util.getNodesByClass('vtkMRMLSegmentationNode')
                  if node.GetName() not in loaded_masks.keys()}
@@ -798,13 +859,15 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
         self.logger.debug('No loaded masks to save...')
       else:
         self.logger.info('Saving %d loaded masks...', len(loaded_masks))
-        self._saveMasks(loaded_masks, self.image_root, reader_name)
+        main_mask = self._saveMasks(loaded_masks, self.image_root, reader_name)
     if save_new_masks:
       if len(new_masks) == 0:
         self.logger.debug('No new masks to save...')
       else:
         self.logger.info('Saving %d new masks...', len(new_masks))
-        self._saveMasks(new_masks, self.image_root, reader_name)
+        first_mask = self._saveMasks(new_masks, self.image_root, reader_name)
+        if main_mask is None:
+          main_mask = first_mask
 
     # Close the scene and start a fresh one
     if slicer.util.selectedModule() == 'SegmentEditor':
@@ -813,6 +876,8 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     slicer.mrmlScene.Clear(0)
     node = slicer.vtkMRMLViewNode()
     slicer.mrmlScene.AddNode(node)
+
+    return main_mask
 
   #------------------------------------------------------------------------------
   def _rotateToVolumePlanes(self, referenceVolume):
@@ -828,6 +893,11 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
   #------------------------------------------------------------------------------
   def _saveMasks(self, nodes, folder, reader_name=None):
+    main_mask_Node = self.maskNode
+    if self.maskOutNode is not None:
+      main_mask_Node = self.maskOutNode
+
+    main_mask = None
     for nodename, node in nodes.iteritems():
       target_dir = folder
       storage_node = node.GetStorageNode()
@@ -840,8 +910,8 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
         nodename += '_' + reader_name
       filename = os.path.join(target_dir, nodename)
 
-      # Prevent overwriting existing files
-      if os.path.exists(filename + '.seg.nrrd'):
+      # Prevent overwriting existing files (exception: stored output mask!)
+      if os.path.exists(filename + '.seg.nrrd') and node != self.maskOutNode:
         self.logger.debug('Filename exists! Generating unique name...')
         idx = 1
         filename += '(%d).seg.nrrd'
@@ -853,4 +923,9 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
       # Save the node
       slicer.util.saveNode(node, filename)
+      if main_mask is None:  # Return the filename for the first saved mask
+        main_mask = filename
+      if node == main_mask_Node:  # Overwrite the output if the node reflects the main mask
+        main_mask = filename
       self.logger.info('Saved node %s in %s', nodename, os.path.abspath(filename))
+    return main_mask
