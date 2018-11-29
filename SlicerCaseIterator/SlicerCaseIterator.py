@@ -257,7 +257,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Connect buttons to functions
     #
 
-    self.batchTableSelector.connect('currentNodeChanged(vtkMRMLNode*)', self.onChangeTable)
+    self.batchTableSelector.connect('nodeActivated(vtkMRMLNode*)', self.onChangeTable)
 
     self.loadBatchButton.connect('clicked(bool)', self.onLoadBatch)
     self.previousButton.connect('clicked(bool)', self.onPrevious)
