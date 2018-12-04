@@ -68,3 +68,22 @@ The following customization is available when processing a batch of cases:
 When both `Save loaded masks` and `Save new masks` are unchecked, nothing is saved, and SlicerCaseIterator will
 only show you the cases. **N.B. any newly added labelmaps and changes are discarded when the user switches
 to a different case!**
+
+### Example
+
+The format of the csv file is pretty simple but needs to be customized for the layout of your data.  Here's a simple example to generate a csv file for a typical layout, such as /data/Examples/pat1/pat1.nii.gz and /data/Examples/pat1/pat1-label.nii.gz.
+
+```python
+
+pathFormat = '/data/Examples/pat%d'
+imageFormat = 'pat%d.nii.gz'
+maskFormat = 'pat%d-label.nii.gz'
+
+with open('/tmp/chd.csv', 'w') as fp:
+    # write header row
+    fp.write("path,image,mask\n")
+    # write a line for each study
+    for patIndex in range(19):
+        fp.write("%s,%s,%s\n" % (pathFormat % patIndex, imageFormat % patIndex, maskFormat % patIndex))
+
+```
