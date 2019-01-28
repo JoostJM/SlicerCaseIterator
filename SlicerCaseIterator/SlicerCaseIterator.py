@@ -65,6 +65,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Instantiate some variables used during iteration
     self.csv_dir = None  # Directory containing the file specifying the cases, needed when using relative paths
     self.tableNode = None
+    self.tableStorageNode = None
     self.caseColumns = None  # Dictionary holding the specified (and found) columns from the batchTable
     self.currentCase = None  # Represents the currently loaded case
     self.caseCount = 0  # Counter equalling the total number of cases
@@ -314,6 +315,11 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self.logger.info('Loading %s...' % self.inputPathSelector.currentPath)
       logic = slicer.modules.tables.logic()
       newTable = logic.AddTable(self.inputPathSelector.currentPath)  # 2nd argument (string) can set the table name
+      if newTable.GetStorageNode() is None:
+        storageNode = newTable.CreateDefaultStorageNode()
+        storageNode.SetFileName(self.inputPathSelector.currentPath)
+        slicer.mrmlScene.AddNode(storageNode)
+        newTable.SetAndObserveStorageNodeID(storageNode.GetID())
       self.batchTableSelector.setCurrentNode(newTable)
       self.batchTableView.setMRMLTableNode(newTable)
 
@@ -375,6 +381,9 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       slicer.mrmlScene.AddNode(self.tableNode)
       self.batchTableSelector.setCurrentNode(self.tableNode)
       self.batchTableView.setMRMLTableNode(self.tableNode)
+      if self.tableStorageNode is not None:
+        slicer.mrmlScene.AddNode(self.tableStorageNode)
+        self.tableNode.SetAndObserveStorageNodeID(self.tableStorageNode.GetID())
 
   # ------------------------------------------------------------------------------
   def saveTable(self):
@@ -383,10 +392,15 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       return
 
     # Store the results!
-    table_storage = self.tableNode.GetStorageNode()
-    if table_storage is not None:
-      self.logger.info('Storing table at %s', table_storage.GetFileName())
-      slicer.util.saveNode(self.tableNode, table_storage.GetFileName())
+    if self.tableStorageNode is not None:
+      fname = self.tableStorageNode.GetFileName()
+      if fname is not None:
+        self.logger.info('Storing table at %s', fname)
+        slicer.util.saveNode(self.tableNode, fname)
+      else:
+        self.logger.warning("Filename for table is not set in storage node")
+    else:
+      self.logger.warning("Storage node is None!")
 
   #------------------------------------------------------------------------------
   def loadCase(self, idx_change):
@@ -491,11 +505,13 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
   #------------------------------------------------------------------------------
   def _getColumnValue(self, colName, is_list=False):
-    if colName not in self.caseColumns or self.caseColumns[colName].GetValue(self.currentIdx) == '':
+    if colName not in self.caseColumns:
       return None
 
     if is_list:
-      return [col.GetValue(self.currentIdx) for col in self.caseColumns[colName]]
+      return [col.GetValue(self.currentIdx) for col in self.caseColumns[colName] if col.GetValue(self.currentIdx) != '']
+    elif self.caseColumns[colName].GetValue(self.currentIdx) == '':
+      return None
     else:
       return self.caseColumns[colName].GetValue(self.currentIdx)
 
@@ -504,6 +520,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     self.caseColumns = {}
     self.tableNode = self.batchTableSelector.currentNode()
+    self.tableStorageNode = self.tableNode.GetStorageNode()
 
     # If the table was loaded from a file, get the directory containing the file as reference for relative paths
     if self.tableNode.GetStorageNode() is not None and self.tableNode.GetStorageNode().GetFileName() is not None:
@@ -697,6 +714,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     self.image = image
     self.mask = mask
     self.mask_out = kwargs.get('mask_out')
+    self.store_relative = True
 
     self.GenerateMasks = kwargs.get('GenerateMasks', True)
     self.GenerateAddMasks = kwargs.get('GenerateAddMasks', True)
@@ -727,6 +745,8 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     if self.mask_out is not None:
       self.addMas.append(self.mask_out)
     if self.mask is not None:
+      if os.path.isabs(self.mask):
+        self.store_relative = False
       self.addMas.append(self.mask)
 
     self.maskNode = None
@@ -811,7 +831,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       file_base = os.path.splitext(os.path.basename(ma_filepath))[0]
       if isSegmentation:
         # split off .seg
-        file_base = os.path.splitext(file_base)
+        file_base = os.path.splitext(file_base)[0]
       ma_node.SetName(file_base)
       if ma_node is not None:
         self.mask_nodes[ma] = ma_node
@@ -923,9 +943,14 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
       # Save the node
       slicer.util.saveNode(node, filename)
+      filename = os.path.abspath(filename)
       if main_mask is None:  # Return the filename for the first saved mask
         main_mask = filename
       if node == main_mask_Node:  # Overwrite the output if the node reflects the main mask
         main_mask = filename
-      self.logger.info('Saved node %s in %s', nodename, os.path.abspath(filename))
+      self.logger.info('Saved node %s in %s', nodename, filename)
+
+    if self.store_relative and main_mask is not None:
+      main_mask = os.path.relpath(main_mask, self.root)
+
     return main_mask
