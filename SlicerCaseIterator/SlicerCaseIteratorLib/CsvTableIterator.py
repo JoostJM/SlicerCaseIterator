@@ -397,6 +397,9 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
         store_node.SetFileName('%s.seg%s' % (file_base, ext))
 
+        # UnRegister the storage node to prevent a memory leak
+        store_node.UnRegister(None)
+
     if not load_success:
       self.logger.warning('Failed to load ' + ma_path)
       return None

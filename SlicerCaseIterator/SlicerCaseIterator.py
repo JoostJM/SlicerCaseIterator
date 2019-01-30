@@ -331,7 +331,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     self.logger = logging.getLogger('SlicerCaseIterator.logic')
 
     # Iterator class defining the iterable to iterate over cases
-    assert isinstance(iterator, IteratorBase.IteratorBase)
+    assert isinstance(iterator, IteratorBase.IteratorLogicBase)
     self.iterator = iterator
     assert self.iterator.caseCount >= start, 'No cases to process (%d cases, start %d)' % (self.caseCount, start)
     self.currentIdx = start - 1  # Current case index (starts at 0 for fist case, -1 means nothing loaded)
