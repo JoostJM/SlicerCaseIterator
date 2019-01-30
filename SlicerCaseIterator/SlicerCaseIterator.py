@@ -344,11 +344,8 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Variables to hold references to loaded image and mask nodes
     self.currentCase = None
 
+    self.redirect = redirect
     self._loadCase()
-
-    if redirect:
-      if slicer.util.selectedModule() != 'SegmentEditor':
-        slicer.util.selectModule('SegmentEditor')
 
   def __del__(self):
     # Free up the references to the nodes to allow GC and prevent memory leaks
@@ -406,10 +403,17 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       # Snap the viewers to the slice plane of the main image
       self._rotateToVolumePlanes(im)
 
-      if slicer.util.selectedModule() == 'SegmentEditor':
-        print('entering segment editor')
-        # Trigger the segmenteditor to refresh
-        slicer.modules.SegmentEditorWidget.enter()
+      if self.redirect:
+        if slicer.util.selectedModule() != 'SegmentEditor':
+          slicer.util.selectModule('SegmentEditor')
+        else:
+          slicer.modules.SegmentEditorWidget.enter()
+
+        # Explictly set the segmentation and master volume nodes
+        segmentEditorWidget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
+        if ma is not None:
+          segmentEditorWidget.setSegmentationNode(ma)
+        segmentEditorWidget.setMasterVolumeNode(im)
 
     except Exception as e:
       self.logger.warning("Error loading new case: %s", e.message)
