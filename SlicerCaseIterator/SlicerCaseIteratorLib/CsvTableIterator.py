@@ -30,10 +30,6 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.tableNode = None
     self.tableStorageNode = None
 
-  def __del__(self):
-    self.logger.debug('Destroying CSV Table Iterator')
-    self.cleanupBatch()
-
   # ------------------------------------------------------------------------------
   def setup(self):
     self.CsvInputGroupBox = qt.QGroupBox('CSV input for local files')
@@ -142,15 +138,6 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
         self.tableNode.SetAndObserveStorageNodeID(self.tableStorageNode.GetID())
 
   # ------------------------------------------------------------------------------
-  def onChangeTable(self):
-    self.batchTableView.setMRMLTableNode(self.batchTableSelector.currentNode())
-    self.validate()
-
-  # ------------------------------------------------------------------------------
-  def onChangeImageColumn(self):
-    self.validate()
-
-  # ------------------------------------------------------------------------------
   def is_valid(self):
     """
     This function checks the current config to decide whether a batch can be started. This is used to enable/disable
@@ -170,12 +157,21 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 
     columnMap = self._parseConfig()
 
-    return CaseTableIterator(self.tableNode, columnMap)
+    return CaseTableIteratorLogic(self.tableNode, columnMap)
 
   # ------------------------------------------------------------------------------
   def cleanupBatch(self):
     self.tableNode = None
     self.tableStorageNode = None
+
+  # ------------------------------------------------------------------------------
+  def onChangeTable(self):
+    self.batchTableView.setMRMLTableNode(self.batchTableSelector.currentNode())
+    self.validate()
+
+  # ------------------------------------------------------------------------------
+  def onChangeImageColumn(self):
+    self.validate()
 
   # ------------------------------------------------------------------------------
   def _parseConfig(self):
@@ -208,10 +204,10 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 # ------------------------------------------------------------------------------
 
 
-class CaseTableIterator(IteratorBase.IteratorBase):
+class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
   def __init__(self, tableNode, columnMap):
-    super(CaseTableIterator, self).__init__()
+    super(CaseTableIteratorLogic, self).__init__()
     assert tableNode is not None, 'No table selected! Cannot instantiate batch'
 
     # If the table was loaded from a file, get the directory containing the file as reference for relative paths

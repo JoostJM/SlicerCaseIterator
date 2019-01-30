@@ -15,14 +15,26 @@ from abc import abstractmethod
 import logging
 
 # ------------------------------------------------------------------------------
-# SlicerCaseIterator CSV iterator
+# IteratorWidgetBase
 # ------------------------------------------------------------------------------
 
 class IteratorWidgetBase(object):
+  """
+  Base class for the GUI subsection controlling the input. It defines the GUI elements (via the `setup` function), and
+  controls the starting of the batch (`startBatch`, returns an instance derived from IteratorLogicBase). Moreover, this
+  class contains functionality to signal or provide information on validity of the current config (used to determine
+  whether the user is allowed to start the batch) and some functionality to cleanup after a batch is done. Finally,
+  this class can respond to the user activating the CaseIterator module and when a scene is closed by the user during
+  the iterator over a batch (should treated as "cancel the review/updates of this case", but not stop the iteration).
+  """
 
   def __init__(self):
     self.logger = logging.getLogger('SlicerCaseIterator.IteratorWidget')
     self.validationHandler = None
+
+  def __del__(self):
+    self.logger.debug('Destroying Iterator Widget')
+    self.cleanupBatch()
 
   @abstractmethod
   def setup(self):
@@ -32,6 +44,11 @@ class IteratorWidgetBase(object):
     """
 
   def enter(self):
+    """
+    This function is called from the main widget when the user activates the CaseIterator module GUI, and can be used
+    to refresh controls
+    :return: None
+    """
     pass
 
   def onEndClose(self):
@@ -65,12 +82,19 @@ class IteratorWidgetBase(object):
     """
 
 
-
 # ------------------------------------------------------------------------------
-# SlicerCaseIterator CSV iterator
+# IteratorLogicBase
 # ------------------------------------------------------------------------------
 
-class IteratorBase(object):
+class IteratorLogicBase(object):
+  """
+  Base class for the iterator object. An instance of a class derived from this class is returned by the corresponding
+  widget's startBatch function. 3 attributes are accessed from the CaseIteratorLogic:
+
+  - caseCount: Integer specifying how many cases are present in the batch defined by this iterator
+  - loadCase: Function to load a certain case, specified by the passed `case_idx`
+  - saveMask: Function to store a loaded or new mask.
+  """
 
   def __init__(self):
     self.logger = logging.getLogger('SlicerCaseIterator.Iterator')
@@ -81,7 +105,7 @@ class IteratorBase(object):
     """
     Function called by the logic to load the next desired case, as specified by the case_idx.
     :param case_idx: index of the next case to load, 0 <= case_idx < self.caseCount
-    :return:
+    :return: Tuple containing loaded nodes: (main_image, main_mask, list of additional images, list of additional masks)
     """
 
   @abstractmethod
