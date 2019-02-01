@@ -22,17 +22,17 @@ from . import IteratorBase
 # ------------------------------------------------------------------------------
 
 
-class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
+class DicomTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 
   def __init__(self):
-    super(CaseTableIteratorWidget, self).__init__()
+    super(DicomTableIteratorWidget, self).__init__()
 
     self.tableNode = None
     self.tableStorageNode = None
 
   # ------------------------------------------------------------------------------
   def setup(self):
-    self.layout = qt.QGroupBox('CSV input for local files')
+    self.layout = qt.QGroupBox('CSV input for DICOM')
 
     InputLayout = qt.QFormLayout(self.layout)
 
@@ -74,21 +74,12 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     inputParametersFormLayout = qt.QFormLayout(self.inputParametersGroupBox)
 
     #
-    # Root Path
-    #
-    self.rootSelector = qt.QLineEdit()
-    self.rootSelector.text = 'path'
-    self.rootSelector.toolTip = 'Location of the root directory to load from, or the column name specifying said ' \
-                                'directory in the input CSV'
-    inputParametersFormLayout.addRow('Root Column', self.rootSelector)
-
-    #
     # Image Path
     #
     self.imageSelector = qt.QLineEdit()
     self.imageSelector.text = 'image'
-    self.imageSelector.toolTip = 'Name of the column specifying main image files in input CSV'
-    inputParametersFormLayout.addRow('Image Column', self.imageSelector)
+    self.imageSelector.toolTip = 'Name of the column specifying main dicom series uid in input CSV'
+    inputParametersFormLayout.addRow('Main Series Column', self.imageSelector)
 
     #
     # Mask Path
@@ -96,15 +87,15 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.maskSelector = qt.QLineEdit()
     self.maskSelector.text = 'mask'
     self.maskSelector.toolTip = 'Name of the column specifying main mask files in input CSV'
-    inputParametersFormLayout.addRow('Mask Column', self.maskSelector)
+    inputParametersFormLayout.addRow('Main Mask Column', self.maskSelector)
 
     #
     # Additional images
     #
     self.addImsSelector = qt.QLineEdit()
     self.addImsSelector.text = ''
-    self.addImsSelector.toolTip = 'Comma separated names of the columns specifying additional image files in input CSV'
-    inputParametersFormLayout.addRow('Additional images Column', self.addImsSelector)
+    self.addImsSelector.toolTip = 'Comma separated names of the columns specifying additional series uids in input CSV'
+    inputParametersFormLayout.addRow('Additional series Column', self.addImsSelector)
 
     #
     # Additional masks
@@ -157,7 +148,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 
     columnMap = self._parseConfig()
 
-    return CaseTableIteratorLogic(self.tableNode, columnMap)
+    return DicomTableIteratorLogic(self.tableNode, columnMap)
 
   # ------------------------------------------------------------------------------
   def cleanupBatch(self):
@@ -181,17 +172,14 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     """
     columnMap = {}
 
-    if self.rootSelector.text != '':
-      columnMap['root'] = str(self.rootSelector.text).strip()
-
     assert self.imageSelector.text != ''  # Image column is a required column
-    columnMap['image'] = str(self.imageSelector.text).strip()
+    columnMap['mainSeries'] = str(self.imageSelector.text).strip()
 
     if self.maskSelector.text != '':
-      columnMap['mask'] = str(self.maskSelector.text).strip()
+      columnMap['mainMask'] = str(self.maskSelector.text).strip()
 
     if self.addImsSelector.text != '':
-      columnMap['additionalImages'] = [str(c).strip() for c in self.addImsSelector.text.split(',')]
+      columnMap['additionalSeries'] = [str(c).strip() for c in self.addImsSelector.text.split(',')]
 
     if self.addMasksSelector.text != '':
       columnMap['additionalMasks'] = [str(c).strip() for c in self.addMasksSelector.text.split(',')]
@@ -204,10 +192,10 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 # ------------------------------------------------------------------------------
 
 
-class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
+class DicomTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
   def __init__(self, tableNode, columnMap):
-    super(CaseTableIteratorLogic, self).__init__()
+    super(DicomTableIteratorLogic, self).__init__()
     assert tableNode is not None, 'No table selected! Cannot instantiate batch'
 
     # If the table was loaded from a file, get the directory containing the file as reference for relative paths
@@ -224,11 +212,10 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     self.caseColumns = self._getColumns(columnMap)
 
     self.caseCount = self.batchTable.GetNumberOfRows()  # Counter equalling the total number of cases
-    self.currentCaseFolder = None  # Represents the currently loaded case
 
   # ------------------------------------------------------------------------------
   def __del__(self):
-    self.logger.debug('Destroying CSV Table Iterator')
+    self.logger.debug('Destroying Dicom Table Iterator')
     self.batchTable = None
     self.caseColumns = None
 
@@ -252,18 +239,10 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
           col_list.append(col)
       caseColumns[key] = col_list
 
-    # Special case: Check if there is a column "patient" or "ID" (used for additional naming of the case during logging)
-    patientColumn = self.batchTable.GetColumnByName('patient')
-    if patientColumn is None:
-      patientColumn = self.batchTable.GetColumnByName('ID')
-    if patientColumn is not None:
-      caseColumns['patient'] = patientColumn
-
     # Get the other configurable columns
-    getColumn('root')
-    getColumn('image')
-    getColumn('mask')
-    getListColumn('additionalImages')
+    getColumn('mainSeries')
+    getColumn('mainMask')
+    getListColumn('additionalSeries')
     getListColumn('additionalMasks')
 
     return caseColumns
@@ -272,30 +251,36 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
   def loadCase(self, case_idx):
     assert 0 <= case_idx < self.caseCount, 'case_idx %d is out of range (n cases: %d)' % (case_idx, self.caseCount)
 
-    if 'patient' in self.caseColumns:
-      patient = self.caseColumns['patient'].GetValue(case_idx)
-      self.logger.info('Loading patient (%d/%d): %s...', case_idx + 1, self.caseCount, patient)
-    else:
-      self.logger.info('Loading patient (%d/%d)...', case_idx + 1, self.caseCount)
-
-    root = self._getColumnValue('root', case_idx)
+    self.logger.debug('Starting load of case %i', case_idx)
 
     # Load images
-    im = self._getColumnValue('image', case_idx)
-    im_node = self._loadImageNode(root, im)
-    assert im_node is not None, 'Failed to load main image'
-    self.currentCaseFolder = os.path.dirname(im_node.GetStorageNode().GetFileName())
+    series = self._getColumnValue('mainSeries', case_idx)
+    study = slicer.dicomDatabase.studyForSeries(series)
+    patient = slicer.dicomDatabase.patientForStudy(study)
+    pt_name = slicer.dicomDatabase.nameForPatient(patient)
 
-    additionalImageNodes = []
-    for im in self._getColumnValue('additionalImages', case_idx, True):
-      add_im_node = self._loadImageNode(root, im)
-      if add_im_node is not None:
-        additionalImageNodes.append(add_im_node)
+    series_description = slicer.dicomDatabase.descriptionForSeries(series)
+    filenames = slicer.dicomDatabase.filesForSeries(series)
+
+    self.logger.info('Loading patient (%d/%d): %s...', case_idx + 1, self.caseCount, pt_name)
+
+    load_success, series_node = self._tryLoadDICOMSeries(series_description, filenames)
+
+    assert load_success, 'Failed to load main image (%s)' % series_description
+
+    additionalSeriesNodes = []
+    for series in self._getColumnValue('additionalSeries', case_idx, True):
+      series_description = slicer.dicomDatabase.descriptionForSeries(series)
+      filenames = slicer.dicomDatabase.filesForSeries(series)
+
+      load_success, add_se_node = self._tryLoadDICOMSeries(series_description, filenames)
+      if load_success:
+        additionalSeriesNodes.append(add_se_node)
 
     # Load masks
-    ma = self._getColumnValue('mask', case_idx)
+    ma = self._getColumnValue('mainMask', case_idx)
     if ma is not None:
-      ma_node = self._loadMaskNode(root, ma, im_node)
+      ma_node = self._loadMaskNode(ma, series_node)
     else:
       ma_node = None
 
@@ -305,7 +290,7 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
       if add_ma_node is not None:
         additionalMaskNodes.append(add_ma_node)
 
-    return im_node, ma_node, additionalImageNodes, additionalMaskNodes
+    return series_node, ma_node, additionalSeriesNodes, additionalMaskNodes
 
   # ------------------------------------------------------------------------------
   def _getColumnValue(self, colName, idx, is_list=False):
@@ -318,20 +303,12 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
       return self.caseColumns[colName].GetValue(idx)
 
   # ------------------------------------------------------------------------------
-  def _buildPath(self, caseRoot, fname):
+  def _buildPath(self, fname):
     if fname is None or fname == '':
       return None
 
     if os.path.isabs(fname):
       return fname
-
-    # Add the caseRoot if specified
-    if caseRoot is not None:
-      fname = os.path.join(caseRoot, fname)
-
-      # Check if the caseRoot is an absolute path
-      if os.path.isabs(fname):
-        return fname
 
     # Add the csv_dir to the path if it is not None (loaded table)
     if self.csv_dir is not None:
@@ -340,28 +317,8 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     return os.path.abspath(fname)
 
   # ------------------------------------------------------------------------------
-  def _loadImageNode(self, root, fname):
-    im_path = self._buildPath(root, fname)
-    if im_path is None:
-      return None
-
-    if not os.path.isfile(im_path):
-      self.logger.warning('Volume file %s does not exist, skipping...', fname)
-      return None
-
-    load_success, im_node = slicer.util.loadVolume(im_path, returnNode=True)
-    if not load_success:
-      self.logger.warning('Failed to load ' + im_path)
-      return None
-
-    # Use the file basename as the name for the loaded volume
-    im_node.SetName(os.path.splitext(os.path.basename(im_path))[0])
-
-    return im_node
-
-  # ------------------------------------------------------------------------------
-  def _loadMaskNode(self, root, fname, ref_im=None):
-    ma_path = self._buildPath(root, fname)
+  def _loadMaskNode(self, fname, ref_im=None):
+    ma_path = self._buildPath(fname)
     if ma_path is None:
       return None
 
@@ -413,6 +370,33 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
     return ma_node
 
+  def _tryLoadDICOMSeries(self, seriesdescription, filenames):
+    """
+    Function to examine filenames and attempt to get a valid loadable to get the DICOM series.
+    Adapted from https://github.com/SlicerProstate/mpReview/blob/master/mpReviewPreprocessor.py#L173-L184
+    :param filenames: filenames corresponding to the series to load
+    :return: (Boolean indicating if the load was successful, loaded node)
+    """
+    if len(filenames) == 0:
+      self.logger.warning('No files found for SeriesUID %s' % seriesdescription)
+      return False, None
+
+    self.logger.debug('Found %i files for series %s', len(filenames), seriesdescription)
+
+    plugins = ('MultiVolumeImporterPlugin', 'DICOMScalarVolumePlugin')
+    for p_name in plugins:
+      self.logger.debug('Attempting to load Series using plugin %s', p_name)
+      plugin = slicer.modules.dicomPlugins[p_name]()
+      loadables = plugin.examineFiles(filenames)
+      if len(loadables) == 0:
+        continue
+      loadables.sort(key=lambda x: x.confidence, reverse=True)
+      if loadables[0].confidence > 0.1:
+        self.logger.debug('Loading DICOM Series %s using plugin %s', seriesdescription, p_name)
+        return True, plugin.load(loadables[0])  # Loads the series into a new node and adds it to the scene
+    self.logger.warning('Failed to find a valid loader for series %s', seriesdescription)
+    return False, None
+
   # ------------------------------------------------------------------------------
   def saveMask(self, node, reader, overwrite_existing=False):
     storage_node = node.GetStorageNode()
@@ -420,7 +404,7 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
       # mask was loaded, save the updated mask in the same directory
       target_dir = os.path.dirname(storage_node.GetFileName())
     else:
-      target_dir = self.currentCaseFolder
+      target_dir = self.csv_dir
 
     if not os.path.isdir(target_dir):
       self.logger.debug('Creating output directory at %s', target_dir)

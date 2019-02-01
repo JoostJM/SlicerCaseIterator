@@ -16,7 +16,7 @@ import logging
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
-from SlicerCaseIteratorLib import IteratorBase, CsvTableIterator
+from SlicerCaseIteratorLib import IteratorBase, CsvTableIterator, DicomTableIterator
 
 
 # ------------------------------------------------------------------------------
@@ -50,7 +50,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
   def __del__(self):
     self.logger.debug('Destroying Slicer Case Iterator Widget')
     self.logic = None
-    self.inputWidget = None
+    self.inputWidgets = None
+    self.currentInput = None
     self._disconnectHandlers()
 
   def setup(self):
@@ -58,10 +59,6 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     # Setup a logger for the extension log messages
     self.logger = logging.getLogger('SlicerCaseIterator')
-
-    # Setup the widget for CSV table input
-    self.inputWidget = CsvTableIterator.CaseTableIteratorWidget()
-    self.inputWidget.validationHandler = self.onValidateInput
 
     self.logic = None
 
@@ -82,8 +79,23 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     inputDataFormLayout = qt.QFormLayout(self.inputDataCollapsibleButton)
 
-    self.inputParametersGroupBox = self.inputWidget.setup()
-    inputDataFormLayout.addRow(self.inputParametersGroupBox)
+    self.inputSelector = qt.QComboBox()
+    self.inputSelector.addItems(['Local File Table', 'DICOM Table'])
+    self.inputSelector.toolTip = 'Select method for defining the batch'
+    inputDataFormLayout.addRow('Iterator Type', self.inputSelector)
+
+    self.inputWidgets = [
+      CsvTableIterator.CaseTableIteratorWidget(),
+      DicomTableIterator.DicomTableIteratorWidget()
+    ]
+
+    for idx, inputwidget in enumerate(self.inputWidgets):
+      widget_layout = inputwidget.setup()
+      inputwidget.validationHandler = self.onValidateInput
+      if idx > 0:  # Only show the first widget (currently selected)
+        widget_layout.visible = False
+      inputDataFormLayout.addRow(widget_layout)
+    self.currentInput = self.inputWidgets[0]
 
     #
     # Parameters Area
@@ -169,6 +181,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Connect buttons to functions
     #
 
+    self.inputSelector.connect('currentIndexChanged(int)', self.onChangeInput)
     self.previousButton.connect('clicked(bool)', self.onPrevious)
     self.nextButton.connect('clicked(bool)', self.onNext)
     self.resetButton.connect('clicked(bool)', self.onReset)
@@ -177,8 +190,13 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
   # ------------------------------------------------------------------------------
   def enter(self):
-    if hasattr(self, 'inputWidget'):
-      self.inputWidget.enter()
+    if hasattr(self, 'currentInput'):
+      self.currentInput.enter()
+
+  def onChangeInput(self):
+    self.currentInput.layout.visible = False
+    self.currentInput = self.inputWidgets[self.inputSelector.currentIndex]
+    self.currentInput.layout.visible = True
 
   # ------------------------------------------------------------------------------
   def onValidateInput(self, is_valid):
@@ -195,7 +213,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
         reader = self.txtReaderName.text
         if reader == '':
           reader = None
-        iterator = self.inputWidget.startBatch()
+        iterator = self.currentInput.startBatch()
         self.logic = SlicerCaseIteratorLogic(iterator,
                                              self.npStart.value,
                                              self.chkAutoRedirect.checked == 1,
@@ -210,7 +228,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     else:
       # End the batch and clean up
-      self.inputWidget.cleanupBatch()
+      self.currentInput.cleanupBatch()
       self.logic = None
       self._setGUIstate(csv_loaded=False)
 
@@ -240,7 +258,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
   def onEndClose(self, caller, event):
     # Pass event on to the input widget (enables restoring batch related nodes to
     # the new scene)
-    self.inputWidget.onEndClose()
+    if hasattr(self, 'currentInput'):
+      self.currentInput.onEndClose()
 
     if self.logic is not None and self.logic.currentCase is not None:
       self.logic.currentCase = None
@@ -265,7 +284,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self._connectHandlers()
     else:
       # reset Button is locked when loading cases, ensure it is unlocked to load new batch
-      self.resetButton.enabled = self.inputWidget.is_valid()
+      self.resetButton.enabled = self.currentInput.is_valid()
       self.resetButton.text = 'Start Batch'
 
       self._disconnectHandlers()
@@ -273,7 +292,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.previousButton.enabled = csv_loaded
     self.nextButton.enabled = csv_loaded
 
-    self.inputParametersGroupBox.enabled = not csv_loaded
+    self.inputSelector.enabled = not csv_loaded
+    self.currentInput.layout.enabled = not csv_loaded
 
   # ------------------------------------------------------------------------------
   def _connectHandlers(self):
