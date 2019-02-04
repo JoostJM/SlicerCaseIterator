@@ -69,9 +69,10 @@ class IteratorWidgetBase(object):
     return True
 
   @abstractmethod
-  def startBatch(self):
+  def startBatch(self, reader):
     """
     Function to start the batch. In the derived class, this should store relevant nodes to keep track of important data
+    :param reader: String defining the reader who created/updated the segmentation, can be None
     :return: Instance of class, derived from IteratorBase
     """
 
@@ -97,9 +98,10 @@ class IteratorLogicBase(object):
   - saveMask: Function to store a loaded or new mask.
   """
 
-  def __init__(self):
+  def __init__(self, reader):
     self.logger = logging.getLogger('SlicerCaseIterator.Iterator')
     self.caseCount = None
+    self.reader = reader
 
   @abstractmethod
   def loadCase(self, case_idx):
@@ -110,11 +112,10 @@ class IteratorLogicBase(object):
     """
 
   @abstractmethod
-  def saveMask(self, node, reader, overwrite_existing=False):
+  def saveMask(self, node, overwrite_existing=False):
     """
     Function to save the passed mask
     :param node: vtkMRMLSegmentationNode containing the segmentation to store
-    :param reader: String defining the reader who created/updated the segmentation, can be None
     :param overwrite_existing: If set to True, existing files are overwritten, otherwise, unique filenames are generated
     :return: None
     """

@@ -147,7 +147,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     return self.batchTableSelector.currentNodeID != '' and self.imageSelector.text != ''
 
   # ------------------------------------------------------------------------------
-  def startBatch(self):
+  def startBatch(self, reader):
     """
     Function to start the batch. In the derived class, this should store relevant nodes to keep track of important data
     :return: instance of an Iterator class defining the dataset to iterate over, and function for loading/storing a case
@@ -157,7 +157,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 
     columnMap = self._parseConfig()
 
-    return CaseTableIteratorLogic(self.tableNode, columnMap)
+    return CaseTableIteratorLogic(reader, self.tableNode, columnMap)
 
   # ------------------------------------------------------------------------------
   def cleanupBatch(self):
@@ -206,8 +206,8 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 
 class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
-  def __init__(self, tableNode, columnMap):
-    super(CaseTableIteratorLogic, self).__init__()
+  def __init__(self, reader, tableNode, columnMap):
+    super(CaseTableIteratorLogic, self).__init__(reader)
     assert tableNode is not None, 'No table selected! Cannot instantiate batch'
 
     # If the table was loaded from a file, get the directory containing the file as reference for relative paths
@@ -414,7 +414,7 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     return ma_node
 
   # ------------------------------------------------------------------------------
-  def saveMask(self, node, reader, overwrite_existing=False):
+  def saveMask(self, node, overwrite_existing=False):
     storage_node = node.GetStorageNode()
     if storage_node is not None and storage_node.GetFileName() is not None:
       # mask was loaded, save the updated mask in the same directory
@@ -428,8 +428,8 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
     nodename = node.GetName()
     # Add the readername if set
-    if reader is not None:
-      nodename += '_' + reader
+    if self.reader is not None:
+      nodename += '_' + self.reader
     filename = os.path.join(target_dir, nodename)
 
     # Prevent overwriting existing files

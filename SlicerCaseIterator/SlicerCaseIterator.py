@@ -213,11 +213,10 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
         reader = self.txtReaderName.text
         if reader == '':
           reader = None
-        iterator = self.currentInput.startBatch()
+        iterator = self.currentInput.startBatch(reader)
         self.logic = SlicerCaseIteratorLogic(iterator,
                                              self.npStart.value,
                                              self.chkAutoRedirect.checked == 1,
-                                             reader,
                                              saveNew=(self.chkSaveNewMasks.checked == 1),
                                              saveLoaded=(self.chkSaveMasks.checked == 1))
         self._setGUIstate()
@@ -346,7 +345,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  def __init__(self, iterator, start, redirect, reader=None, saveNew=False, saveLoaded=False):
+  def __init__(self, iterator, start, redirect, saveNew=False, saveLoaded=False):
 
     self.logger = logging.getLogger('SlicerCaseIterator.logic')
 
@@ -357,7 +356,6 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     self.currentIdx = start - 1  # Current case index (starts at 0 for fist case, -1 means nothing loaded)
 
     # Some variables that control the output (formatting and control of discarding/saving
-    self.reader = reader
     self.saveNew = saveNew
     self.saveLoaded = saveLoaded
 
@@ -444,14 +442,14 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     _, mask, _, additionalMasks = self.currentCase
     if self.saveLoaded:
       if mask is not None:
-        self.iterator.saveMask(mask, self.reader)
+        self.iterator.saveMask(mask)
       for ma in additionalMasks:
-        self.iterator.saveMask(ma, self.reader)
+        self.iterator.saveMask(ma)
     if self.saveNew:
       nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode')
                if n not in additionalMasks and n != mask]
       for n in nodes:
-        self.iterator.saveMask(n, self.reader)
+        self.iterator.saveMask(n)
 
     # Remove reference to current case, signalling it is closed
     self.currentCase = None
