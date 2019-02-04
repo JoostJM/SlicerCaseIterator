@@ -111,6 +111,15 @@ class IteratorLogicBase(object):
     :return: Tuple containing loaded nodes: (main_image, main_mask, list of additional images, list of additional masks)
     """
 
+  def should_close(self, case_idx):
+    """
+    Function to check if the next case to load represents a new patient, or just different masks. In any case, all
+    segmentation nodes are closed.
+    :param case_idx: index of the new case to load
+    :return: boolean indicating whether the current mrml scene should be closed prior to loading the next case
+    """
+    return True
+
   @abstractmethod
   def saveMask(self, node, overwrite_existing=False):
     """

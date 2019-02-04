@@ -139,7 +139,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Save masks
     #
     self.chkSaveMasks = qt.QCheckBox()
-    self.chkSaveMasks.checked = 0
+    self.chkSaveMasks.checked = 1
     self.chkSaveMasks.toolTip = 'save all initially loaded masks when proceeding to next case'
     parametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
 
@@ -454,14 +454,20 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Remove reference to current case, signalling it is closed
     self.currentCase = None
 
-    # Close the scene and start a fresh one
-    slicer.mrmlScene.Clear(0)
-
     if slicer.util.selectedModule() == 'SegmentEditor':
       slicer.modules.SegmentEditorWidget.exit()
 
-    node = slicer.vtkMRMLViewNode()
-    slicer.mrmlScene.AddNode(node)
+    if self.iterator.should_close(self.currentIdx):
+      # Close the scene and start a fresh one
+      self.logger.debug("Closing scene and starting a new one")
+      slicer.mrmlScene.Clear(0)
+      node = slicer.vtkMRMLViewNode()
+      slicer.mrmlScene.AddNode(node)
+    else:
+      # Keep the images loaded, but remove the segmentation nodes
+      self.logger.debug("Removing segmentation nodes from current scene")
+      for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode'):
+        slicer.mrmlScene.RemoveNode(n)
 
   # ------------------------------------------------------------------------------
   def _rotateToVolumePlanes(self, referenceVolume):
