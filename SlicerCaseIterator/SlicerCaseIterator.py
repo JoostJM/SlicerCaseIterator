@@ -16,7 +16,7 @@ import logging
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
-from SlicerCaseIteratorLib import IteratorBase, CsvTableIterator, DicomTableIterator
+from SlicerCaseIteratorLib import get_iterators, IteratorBase
 
 
 # ------------------------------------------------------------------------------
@@ -79,23 +79,32 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     inputDataFormLayout = qt.QFormLayout(self.inputDataCollapsibleButton)
 
+    self.inputWidgets = {}
+    hdrs = []
+
+    iterators = get_iterators()
+    for it in iterators:
+      self.inputWidgets[it] = iterators[it][0]()  # 1st item in the value is the widget, 2nd the logic
+      hdrs.append(it)
+
     self.inputSelector = qt.QComboBox()
-    self.inputSelector.addItems(['Local File Table', 'DICOM Table'])
+    self.inputSelector.addItems(hdrs)
     self.inputSelector.toolTip = 'Select method for defining the batch'
     inputDataFormLayout.addRow('Iterator Type', self.inputSelector)
 
-    self.inputWidgets = [
-      CsvTableIterator.CaseTableIteratorWidget(),
-      DicomTableIterator.DicomTableIteratorWidget()
-    ]
-
-    for idx, inputwidget in enumerate(self.inputWidgets):
+    for inputwidget in self.inputWidgets.values():
       widget_layout = inputwidget.setup()
+      widget_layout.visible = False
       inputwidget.validationHandler = self.onValidateInput
-      if idx > 0:  # Only show the first widget (currently selected)
-        widget_layout.visible = False
       inputDataFormLayout.addRow(widget_layout)
-    self.currentInput = self.inputWidgets[0]
+
+    start_mode = 'Local File Table'
+    if start_mode not in hdrs:
+      start_mode = hdrs[0]
+
+    self.currentInput = self.inputWidgets[start_mode]
+    self.currentInput.layout.visible = True
+    self.inputSelector.setCurrentText(start_mode)
 
     #
     # Parameters Area
@@ -195,7 +204,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
   def onChangeInput(self):
     self.currentInput.layout.visible = False
-    self.currentInput = self.inputWidgets[self.inputSelector.currentIndex]
+    self.currentInput = self.inputWidgets[self.inputSelector.currentText]
     self.currentInput.layout.visible = True
 
   # ------------------------------------------------------------------------------

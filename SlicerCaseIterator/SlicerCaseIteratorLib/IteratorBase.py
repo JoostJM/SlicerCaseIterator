@@ -37,6 +37,10 @@ class IteratorWidgetBase(object):
     self.logger.debug('Destroying Iterator Widget')
     self.cleanupBatch()
 
+  @classmethod
+  def get_header(cls):
+    return str(cls.__name__).replace('Widget', '')
+
   @abstractmethod
   def setup(self):
     """

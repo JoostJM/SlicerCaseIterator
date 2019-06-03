@@ -30,6 +30,10 @@ class DicomTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.tableNode = None
     self.tableStorageNode = None
 
+  @classmethod
+  def get_header(cls):
+    return 'DICOM Table'
+
   # ------------------------------------------------------------------------------
   def setup(self):
     self.layout = qt.QGroupBox('CSV input for DICOM')

@@ -30,6 +30,10 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.tableNode = None
     self.tableStorageNode = None
 
+  @classmethod
+  def get_header(cls):
+    return 'Local File Table'
+
   # ------------------------------------------------------------------------------
   def setup(self):
     self.layout = qt.QGroupBox('CSV input for local files')
