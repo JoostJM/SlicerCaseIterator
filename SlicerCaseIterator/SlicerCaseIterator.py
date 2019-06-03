@@ -12,6 +12,7 @@
 # ========================================================================
 
 import logging
+import os
 
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
@@ -53,6 +54,63 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.inputWidgets = None
     self.currentInput = None
     self._disconnectHandlers()
+
+  def cleanup(self):
+    try:
+      self._save_user_preferences()
+      self.inputWidgets = None
+    except Exception:
+      pass
+
+  def _load_user_preferences(self):
+    user_prefs_file = os.path.expanduser(os.path.join('~', '.slicercaseiterator'))
+    if not os.path.isfile(user_prefs_file):
+      return
+
+    with open(user_prefs_file, 'r') as fs:
+      user_prefs = {}
+      cur_key = None
+      for l in fs.readlines():
+        l = l.replace('\n', '')  # Remove any newline characters
+        if l.startswith('['):
+          cur_key = l[1:-1]
+          if cur_key not in user_prefs:
+            user_prefs[cur_key] = {}
+        elif cur_key is not None and ': ' in l:
+          key, value = l.split(': ', 1)
+          user_prefs[cur_key][key] = value
+
+    if 'main' in user_prefs:
+      self.txtReaderName.text = user_prefs['main'].get('reader_name', '')
+      selected_iterator = user_prefs['main'].get('selected_iterator', '')
+      if selected_iterator in self.inputWidgets:
+        self.inputSelector.currentText = selected_iterator
+
+    for iterator in self.inputWidgets.values():
+      if iterator.__module__ in user_prefs:
+        iterator.setUserPreferences(user_prefs)
+
+  def _save_user_preferences(self):
+    user_prefs = {
+      'main': {
+        'reader_name': self.txtReaderName.text,
+        'selected_iterator': self.inputSelector.currentText
+      }
+    }
+
+    for iterator in self.inputWidgets.values():
+      iterator_prefs = iterator.getUserPreferences()
+      if iterator_prefs is not None:
+        user_prefs[iterator.__module__] = iterator_prefs
+
+    user_prefs_file = os.path.expanduser(os.path.join('~', '.slicercaseiterator'))
+    # user_prefs_file = r'C:\Users\j.v.griethuysen\test2.txt'
+    with open(user_prefs_file, 'w') as fs:
+      for key in user_prefs:
+        fs.write('[%s]\n' % key)
+        for var in user_prefs[key]:
+          fs.write('%s: %s\n' % (var, user_prefs[key][var]))
+        fs.write('\n')
 
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
@@ -196,6 +254,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.resetButton.connect('clicked(bool)', self.onReset)
 
     self._setGUIstate(csv_loaded=False)
+    self._load_user_preferences()
 
   # ------------------------------------------------------------------------------
   def enter(self):

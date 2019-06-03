@@ -41,6 +41,12 @@ class IteratorWidgetBase(object):
   def get_header(cls):
     return str(cls.__name__).replace('Widget', '')
 
+  def setUserPreferences(self, user_preferences):
+    pass
+
+  def getUserPreferences(self):
+    return None
+
   @abstractmethod
   def setup(self):
     """
