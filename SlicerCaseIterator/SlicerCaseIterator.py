@@ -48,19 +48,19 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  def __del__(self):
-    self.logger.debug('Destroying Slicer Case Iterator Widget')
-    self.logic = None
-    self.inputWidgets = None
-    self.currentInput = None
-    self._disconnectHandlers()
-
   def cleanup(self):
     try:
       self._save_user_preferences()
-      self.inputWidgets = None
     except Exception:
-      pass
+      self.logger.debug('Error saving user preferences!', exc_info=True)
+    self.logger.debug('Destroying Slicer Case Iterator Widget')
+    self.logic = None
+    self._disconnectHandlers()
+
+    # Explicitly remove references to all widgets, so that the controls can be destroyed
+    # If a reference is retained, an access violation error occurs when exiting slicer.
+    self.inputWidgets = None
+    self.currentInput = None
 
   def _load_user_preferences(self):
     user_prefs_file = os.path.expanduser(os.path.join('~', '.slicercaseiterator'))
