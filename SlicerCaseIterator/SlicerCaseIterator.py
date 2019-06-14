@@ -88,7 +88,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     for iterator in self.inputWidgets.values():
       if iterator.__module__ in user_prefs:
-        iterator.setUserPreferences(user_prefs)
+        iterator.setUserPreferences(user_prefs[iterator.__module__])
 
   def _save_user_preferences(self):
     user_prefs = {
@@ -289,7 +289,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
                                              saveLoaded=(self.chkSaveMasks.checked == 1))
         self._setGUIstate()
       except Exception as e:
-        self.logger.error('Error loading batch! %s', e.message)
+        self.logger.error('Error loading batch! %s', e)
         self.logger.debug('', exc_info=True)
         self._setGUIstate(csv_loaded=False)
 
@@ -502,7 +502,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
         segmentEditorWidget.setMasterVolumeNode(im)
 
     except Exception as e:
-      self.logger.warning("Error loading new case: %s", e.message)
+      self.logger.warning("Error loading new case: %s", e)
       self.logger.debug('', exc_info=True)
     return False
 
