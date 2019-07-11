@@ -490,16 +490,16 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       self._rotateToVolumePlanes(im)
 
       if self.redirect:
-        if slicer.util.selectedModule() != 'SegmentEditor':
-          slicer.util.selectModule('SegmentEditor')
+        if slicer.util.selectedModule() != 'Editor':
+          slicer.util.selectModule('Editor')
         else:
-          slicer.modules.SegmentEditorWidget.enter()
+          slicer.modules.EditorWidget.enter()
 
         # Explictly set the segmentation and master volume nodes
-        segmentEditorWidget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
+        EditorWidget = slicer.modules.editor.widgetRepresentation().self()
         if ma is not None:
-          segmentEditorWidget.setSegmentationNode(ma)
-        segmentEditorWidget.setMasterVolumeNode(im)
+          EditorWidget.setMergeNode(ma)
+        EditorWidget.setMasterNode(im)
 
     except Exception as e:
       self.logger.warning("Error loading new case: %s", e)
@@ -514,7 +514,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       for ma in additionalMasks:
         self.iterator.saveMask(ma)
     if self.saveNew:
-      nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode')
+      nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLLabelMapVolumeNode')
                if n not in additionalMasks and n != mask]
       for n in nodes:
         self.iterator.saveMask(n)
@@ -522,8 +522,8 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Remove reference to current case, signalling it is closed
     self.currentCase = None
 
-    if slicer.util.selectedModule() == 'SegmentEditor':
-      slicer.modules.SegmentEditorWidget.exit()
+    if slicer.util.selectedModule() == 'Editor':
+      slicer.modules.EditorWidget.exit()
 
     if self.iterator.should_close(self.currentIdx):
       # Close the scene and start a fresh one
@@ -534,7 +534,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     else:
       # Keep the images loaded, but remove the segmentation nodes
       self.logger.debug("Removing segmentation nodes from current scene")
-      for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode'):
+      for n in slicer.util.getNodesByClass('vtkMRMLLabelMapVolumeNode'):
         slicer.mrmlScene.RemoveNode(n)
 
   # ------------------------------------------------------------------------------
