@@ -420,7 +420,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Iterator class defining the iterable to iterate over cases
     assert isinstance(iterator, IteratorBase.IteratorLogicBase)
     self.iterator = iterator
-    assert self.iterator.caseCount >= start, 'No cases to process (%d cases, start %d)' % (self.caseCount, start)
+    assert self.iterator.caseCount >= start, 'No cases to process (%d cases, start %d)' % (self.iterator.caseCount, start)
     self.currentIdx = start - 1  # Current case index (starts at 0 for fist case, -1 means nothing loaded)
 
     # Some variables that control the output (formatting and control of discarding/saving
