@@ -17,7 +17,7 @@ import os
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
-from SlicerCaseIteratorLib import get_iterators, IteratorBase
+from SlicerCaseIteratorLib import get_iterators, IteratorBase, SegmentationBackend
 
 
 # ------------------------------------------------------------------------------
@@ -194,13 +194,13 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow('Reader name', self.txtReaderName)
 
     #
-    # Auto-redirect to SegmentEditor
+    # Auto-redirect to Segmentation Module
     #
 
     self.chkAutoRedirect = qt.QCheckBox()
     self.chkAutoRedirect.checked = 1
-    self.chkAutoRedirect.toolTip = 'Automatically switch module to "SegmentEditor" when each case is loaded'
-    parametersFormLayout.addRow('Go to Segment Editor', self.chkAutoRedirect)
+    self.chkAutoRedirect.toolTip = 'Automatically switch to segmentation module when each case is loaded'
+    parametersFormLayout.addRow('Go to segmentation module', self.chkAutoRedirect)
 
     #
     # Save masks
@@ -490,16 +490,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       self._rotateToVolumePlanes(im)
 
       if self.redirect:
-        if slicer.util.selectedModule() != 'Editor':
-          slicer.util.selectModule('Editor')
-        else:
-          slicer.modules.EditorWidget.enter()
-
-        # Explictly set the segmentation and master volume nodes
-        EditorWidget = slicer.modules.editor.widgetRepresentation().self()
-        if ma is not None:
-          EditorWidget.setMergeNode(ma)
-        EditorWidget.setMasterNode(im)
+        self.iterator.backend.enter_module(im, ma)
 
     except Exception as e:
       self.logger.warning("Error loading new case: %s", e)
@@ -510,11 +501,11 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     _, mask, _, additionalMasks = self.currentCase
     if self.saveLoaded:
       if mask is not None:
-        self.iterator.saveMask(mask)
+        self.iterator.saveMask(mask,)
       for ma in additionalMasks:
         self.iterator.saveMask(ma)
     if self.saveNew:
-      nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLLabelMapVolumeNode')
+      nodes = [n for n in self.iterator.backend.getMaskNodes()
                if n not in additionalMasks and n != mask]
       for n in nodes:
         self.iterator.saveMask(n)
@@ -522,8 +513,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Remove reference to current case, signalling it is closed
     self.currentCase = None
 
-    if slicer.util.selectedModule() == 'Editor':
-      slicer.modules.EditorWidget.exit()
+    self.iterator.backend.exit_module()
 
     if self.iterator.should_close(self.currentIdx):
       # Close the scene and start a fresh one
@@ -534,7 +524,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     else:
       # Keep the images loaded, but remove the segmentation nodes
       self.logger.debug("Removing segmentation nodes from current scene")
-      for n in slicer.util.getNodesByClass('vtkMRMLLabelMapVolumeNode'):
+      for n in self.iterator.backend.getMaskNodes():
         slicer.mrmlScene.RemoveNode(n)
 
   # ------------------------------------------------------------------------------

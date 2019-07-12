@@ -13,6 +13,11 @@
 
 from abc import abstractmethod
 import logging
+import os
+
+import slicer
+
+from . import SegmentationBackend
 
 # ------------------------------------------------------------------------------
 # IteratorWidgetBase
@@ -106,12 +111,17 @@ class IteratorLogicBase(object):
   - caseCount: Integer specifying how many cases are present in the batch defined by this iterator
   - loadCase: Function to load a certain case, specified by the passed `case_idx`
   - saveMask: Function to store a loaded or new mask.
+
+  :param reader: name of the reader performing the segmentation
+  :param backend: instance derived from SegmentationBackend.SegmentationBackendBase, that can handle loading a mask
   """
 
-  def __init__(self, reader):
+  def __init__(self, reader, backend):
     self.logger = logging.getLogger('SlicerCaseIterator.Iterator')
     self.caseCount = None
     self.reader = reader
+    assert isinstance(backend, SegmentationBackend.SegmentationBackendBase)
+    self.backend = backend
 
   @abstractmethod
   def loadCase(self, case_idx):
@@ -138,3 +148,40 @@ class IteratorLogicBase(object):
     :param overwrite_existing: If set to True, existing files are overwritten, otherwise, unique filenames are generated
     :return: None
     """
+
+  def _save_node(self, node, root, overwrite_existing=False):
+    ext = self.backend.getMaskExtension()
+
+    storage_node = node.GetStorageNode()
+    if storage_node is not None and storage_node.GetFileName() is not None:
+      # mask was loaded, save the updated mask in the same directory
+      target_dir = os.path.dirname(storage_node.GetFileName())
+    else:
+      target_dir = root
+
+    nodename = node.GetName()
+    # Add the readername if set
+    if self.reader is not None:
+      nodename += '_' + self.reader
+    filename = os.path.join(target_dir, nodename)
+
+    if not os.path.isdir(target_dir):
+      self.logger.debug('Creating output directory at %s', target_dir)
+      os.makedirs(target_dir)
+
+    # Prevent overwriting existing files
+    if os.path.exists(filename + ext) and not overwrite_existing:
+      self.logger.debug('Filename exists! Generating unique name...')
+      idx = 1
+      filename += '(%d)' + ext
+      while os.path.exists(filename % idx):
+        idx += 1
+      filename = filename % idx
+    else:
+      filename += ext
+
+    # Save the node
+    slicer.util.saveNode(node, filename)
+    self.logger.info('Saved node %s in %s', nodename, filename)
+
+    return filename

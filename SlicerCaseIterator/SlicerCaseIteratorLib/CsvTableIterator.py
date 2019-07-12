@@ -15,7 +15,7 @@ import os
 
 import vtk, qt, ctk, slicer
 
-from . import IteratorBase
+from . import IteratorBase, SegmentationBackend
 
 # ------------------------------------------------------------------------------
 # SlicerCaseIterator CSV iterator Widget
@@ -211,7 +211,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
   def __init__(self, reader, tableNode, columnMap):
-    super(CaseTableIteratorLogic, self).__init__(reader)
+    super(CaseTableIteratorLogic, self).__init__(reader, SegmentationBackend.SegmentEditorBackend())
     assert tableNode is not None, 'No table selected! Cannot instantiate batch'
 
     # If the table was loaded from a file, get the directory containing the file as reference for relative paths
@@ -278,9 +278,9 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
     if 'patient' in self.caseColumns:
       patient = self.caseColumns['patient'].GetValue(case_idx)
-      self.logger.info('Loading patient (%d/%d): %s...', case_idx + 1, self.caseCount, patient)
+      self.logger.info('\nLoading patient (%d/%d): %s...', case_idx + 1, self.caseCount, patient)
     else:
-      self.logger.info('Loading patient (%d/%d)...', case_idx + 1, self.caseCount)
+      self.logger.info('\nLoading patient (%d/%d)...', case_idx + 1, self.caseCount)
 
     root = self._getColumnValue('root', case_idx)
 
@@ -297,15 +297,20 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
         additionalImageNodes.append(add_im_node)
 
     # Load masks
+    ma_node = None
     ma = self._getColumnValue('mask', case_idx)
     if ma is not None:
-      ma_node = self._loadMaskNode(root, ma, im_node)
-    else:
-      ma_node = None
+      ma_path = self._buildPath(root, ma)
+      if ma_path is not None:
+        ma_node = self.backend.loadMask(ma_path, im_node)
 
     additionalMaskNodes = []
     for ma in self._getColumnValue('additionalMasks', case_idx, True):
-      add_ma_node = self._loadMaskNode(root, ma)
+      ma_path = self._buildPath(root, ma)
+      if ma_path is None:
+        continue
+
+      add_ma_node = self.backend.loadMask(ma_path)
       if add_ma_node is not None:
         additionalMaskNodes.append(add_ma_node)
 
@@ -364,89 +369,5 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     return im_node
 
   # ------------------------------------------------------------------------------
-  def _loadMaskNode(self, root, fname, ref_im=None):
-    ma_path = self._buildPath(root, fname)
-    if ma_path is None:
-      return None
-
-    # Check if the file actually exists
-    if not os.path.isfile(ma_path):
-      self.logger.warning('Segmentation file %s does not exist, skipping...', fname)
-      return None
-
-    # Determine if file is segmentation based on extension
-    isSegmentation = os.path.splitext(ma_path)[0].endswith('.seg')
-    # Try to load the mask
-    if isSegmentation:
-      self.logger.debug('Loading segmentation')
-      load_success, ma_node = slicer.util.loadSegmentation(ma_path, returnNode=True)
-    else:
-      self.logger.debug('Loading labelmap and converting to segmentation')
-      # If not segmentation, then load as labelmap then convert to segmentation
-      load_success, ma_node = slicer.util.loadLabelVolume(ma_path, returnNode=True)
-      if load_success:
-        # Only try to make a segmentation node if Slicer was able to load the label map
-        seg_node = slicer.vtkMRMLSegmentationNode()
-        slicer.mrmlScene.AddNode(seg_node)
-        seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_im)
-        load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node)
-        slicer.mrmlScene.RemoveNode(ma_node)
-        ma_node = seg_node
-
-        # Add a storage node for this segmentation node
-        file_base, ext = os.path.splitext(ma_path)
-        store_node = seg_node.CreateDefaultStorageNode()
-        slicer.mrmlScene.AddNode(store_node)
-        seg_node.SetAndObserveStorageNodeID(store_node.GetID())
-
-        store_node.SetFileName('%s.seg%s' % (file_base, ext))
-
-        # UnRegister the storage node to prevent a memory leak
-        store_node.UnRegister(None)
-
-    if not load_success:
-      self.logger.warning('Failed to load ' + ma_path)
-      return None
-
-    # Use the file basename as the name for the newly loaded segmentation node
-    file_base = os.path.splitext(os.path.basename(ma_path))[0]
-    if isSegmentation:
-      # split off .seg
-      file_base = os.path.splitext(file_base)[0]
-    ma_node.SetName(file_base)
-
-    return ma_node
-
-  # ------------------------------------------------------------------------------
   def saveMask(self, node, overwrite_existing=False):
-    storage_node = node.GetStorageNode()
-    if storage_node is not None and storage_node.GetFileName() is not None:
-      # mask was loaded, save the updated mask in the same directory
-      target_dir = os.path.dirname(storage_node.GetFileName())
-    else:
-      target_dir = self.currentCaseFolder
-
-    if not os.path.isdir(target_dir):
-      self.logger.debug('Creating output directory at %s', target_dir)
-      os.makedirs(target_dir)
-
-    nodename = node.GetName()
-    # Add the readername if set
-    if self.reader is not None:
-      nodename += '_' + self.reader
-    filename = os.path.join(target_dir, nodename)
-
-    # Prevent overwriting existing files
-    if os.path.exists(filename + '.seg.nrrd') and not overwrite_existing:
-      self.logger.debug('Filename exists! Generating unique name...')
-      idx = 1
-      filename += '(%d).seg.nrrd'
-      while os.path.exists(filename % idx):
-        idx += 1
-      filename = filename % idx
-    else:
-      filename += '.seg.nrrd'
-
-    # Save the node
-    slicer.util.saveNode(node, filename)
-    self.logger.info('Saved node %s in %s', nodename, filename)
+    self._save_node(node, self.currentCaseFolder, overwrite_existing)
