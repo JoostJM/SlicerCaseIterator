@@ -140,9 +140,16 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
 
     #
+    # Progressbar
+    #
+    self.progressBar = qt.QProgressBar()
+    self.progressBar.setFormat("%v/%m")
+    self.progressBar.visible = False
+    self.layout.addWidget(self.progressBar)
+
+    #
     # Previous Case
     #
-
     self.previousButton = qt.QPushButton('Previous Case')
     self.previousButton.enabled = False
     self.previousButton.toolTip = '(Ctrl+P) Press this button to go to the previous case, previous new masks are not reloaded'
@@ -203,6 +210,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
                                              saveNew=(self.chkSaveNewMasks.checked == 1),
                                              saveLoaded=(self.chkSaveMasks.checked == 1))
         self._setGUIstate()
+        self._unlockGUI(True)
       except Exception as e:
         self.logger.error('Error loading batch! %s', e.message)
         self.logger.debug('', exc_info=True)
@@ -220,6 +228,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self._unlockGUI(False)
 
     self.logic.previousCase()
+    self.progressBar.value = self.logic.currentIdx+1
 
     # Unlock GUI
     self._unlockGUI(True)
@@ -232,6 +241,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     if self.logic.nextCase():
       # Last case processed, reset GUI
       self.onReset()
+    else:
+      self.progressBar.value = self.logic.currentIdx+1
 
     # Unlock GUI
     self._unlockGUI(True)
@@ -262,6 +273,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self.resetButton.enabled = True
       self.resetButton.text = 'Reset'
 
+      self.progressBar.value = 1
+      self.progressBar.maximum = self.logic.iterator.caseCount
       self._connectHandlers()
     else:
       # reset Button is locked when loading cases, ensure it is unlocked to load new batch
@@ -270,6 +283,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
       self._disconnectHandlers()
 
+    self.progressBar.visible = csv_loaded
     self.previousButton.enabled = csv_loaded
     self.nextButton.enabled = csv_loaded
 
@@ -333,7 +347,8 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Iterator class defining the iterable to iterate over cases
     assert isinstance(iterator, IteratorBase.IteratorLogicBase)
     self.iterator = iterator
-    assert self.iterator.caseCount >= start, 'No cases to process (%d cases, start %d)' % (self.caseCount, start)
+    assert self.iterator.caseCount >= start, 'No cases to process (%d cases, start %d)' % (self.iterator.caseCount,
+                                                                                           start)
     self.currentIdx = start - 1  # Current case index (starts at 0 for fist case, -1 means nothing loaded)
 
     # Some variables that control the output (formatting and control of discarding/saving
@@ -409,7 +424,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
         else:
           slicer.modules.SegmentEditorWidget.enter()
 
-        # Explictly set the segmentation and master volume nodes
+        # Explicitly set the segmentation and master volume nodes
         segmentEditorWidget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
         if ma is not None:
           segmentEditorWidget.setSegmentationNode(ma)

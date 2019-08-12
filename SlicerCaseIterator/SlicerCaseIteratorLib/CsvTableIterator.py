@@ -13,7 +13,7 @@
 
 import os
 
-import vtk, qt, ctk, slicer
+import qt, ctk, slicer
 
 from . import IteratorBase
 
@@ -243,6 +243,7 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
         col = self.batchTable.GetColumnByName(columnMap[key])
         assert col is not None, 'Unable to find column "%s" (key %s)' % (columnMap[key], key)
       caseColumns[key] = col
+
     def getListColumn(key):
       col_list = []
       if key in columnMap:
