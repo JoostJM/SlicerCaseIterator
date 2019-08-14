@@ -120,7 +120,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     #
 
     self.chkAutoRedirect = qt.QCheckBox()
-    self.chkAutoRedirect.checked = 1
+    self.chkAutoRedirect.checked = False
     self.chkAutoRedirect.toolTip = 'Automatically switch module to "SegmentEditor" when each case is loaded'
     parametersFormLayout.addRow('Go to Segment Editor', self.chkAutoRedirect)
 
@@ -128,7 +128,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Save masks
     #
     self.chkSaveMasks = qt.QCheckBox()
-    self.chkSaveMasks.checked = 0
+    self.chkSaveMasks.checked = False
     self.chkSaveMasks.toolTip = 'save all initially loaded masks when proceeding to next case'
     parametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
 
@@ -136,7 +136,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Save masks
     #
     self.chkSaveNewMasks = qt.QCheckBox()
-    self.chkSaveNewMasks.checked = 1
+    self.chkSaveNewMasks.checked = True
     self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
     parametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
 
@@ -170,12 +170,26 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.layout.addWidget(self.progressBar)
 
     #
+    # Case Button Row
+    #
+    self.caseButtonWidget = qt.QWidget()
+    self.caseButtonWidget.setLayout(qt.QHBoxLayout())
+    self.layout.addWidget(self.caseButtonWidget)
+
+    #
+    # Reset
+    #
+    self.resetButton = qt.QPushButton('Start Batch')
+    self.resetButton.enabled = False
+    self.caseButtonWidget.layout().addWidget(self.resetButton)
+
+    #
     # Previous Case
     #
     self.previousButton = qt.QPushButton('Previous Case')
     self.previousButton.enabled = False
     self.previousButton.toolTip = '(Ctrl+P) Press this button to go to the previous case, previous new masks are not reloaded'
-    self.layout.addWidget(self.previousButton)
+    self.caseButtonWidget.layout().addWidget(self.previousButton)
 
     #
     # Load CSV / Next Case
@@ -183,14 +197,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.nextButton = qt.QPushButton('Next Case')
     self.nextButton.enabled = False
     self.nextButton.toolTip = '(Ctrl+N) Press this button to go to the next case'
-    self.layout.addWidget(self.nextButton)
-
-    #
-    # Reset
-    #
-    self.resetButton = qt.QPushButton('Start Batch')
-    self.resetButton.enabled = False
-    self.layout.addWidget(self.resetButton)
+    self.caseButtonWidget.layout().addWidget(self.nextButton)
 
     self.layout.addStretch(1)
 
