@@ -17,8 +17,9 @@ import os
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
-from SlicerCaseIteratorLib import get_iterators, IteratorBase, SegmentationBackend
+import numpy as np
 
+from SlicerCaseIteratorLib import get_iterators, IteratorBase, LayoutLogic
 
 # ------------------------------------------------------------------------------
 # SlicerCaseIterator
@@ -86,6 +87,9 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       if selected_iterator in self.inputWidgets:
         self.inputSelector.currentText = selected_iterator
 
+      if 'multi_viewer' in user_prefs['main']:
+        self.chkLayout.checked = int(user_prefs['main']['mulit_viewer'])
+
     for iterator in self.inputWidgets.values():
       if iterator.__module__ in user_prefs:
         iterator.setUserPreferences(user_prefs[iterator.__module__])
@@ -94,7 +98,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     user_prefs = {
       'main': {
         'reader_name': self.txtReaderName.text,
-        'selected_iterator': self.inputSelector.currentText
+        'selected_iterator': self.inputSelector.currentText,
+        'mulit_viewer': self.chkLayout.checked
       }
     }
 
@@ -219,6 +224,15 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
 
     #
+    # Side-by-side layout
+    #
+    self.chkLayout = qt.QCheckBox()
+    self.chkLayout.checked = 1
+    self.chkLayout.toolTip = 'If checked, all loaded volumes are displayed in separate viewers, ' \
+                             'otherwise a single viewer is shown'
+    parametersFormLayout.addRow('Mult-viewer', self.chkLayout)
+
+    #
     # Previous Case
     #
 
@@ -286,7 +300,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
                                              self.npStart.value,
                                              self.chkAutoRedirect.checked == 1,
                                              saveNew=(self.chkSaveNewMasks.checked == 1),
-                                             saveLoaded=(self.chkSaveMasks.checked == 1))
+                                             saveLoaded=(self.chkSaveMasks.checked == 1),
+                                             multiViewer=(self.chkLayout.checked == 1))
         self._setGUIstate()
       except Exception as e:
         self.logger.error('Error loading batch! %s', e)
@@ -413,7 +428,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  def __init__(self, iterator, start, redirect, saveNew=False, saveLoaded=False):
+  def __init__(self, iterator, start, redirect, saveNew=False, saveLoaded=False, multiViewer=False):
 
     self.logger = logging.getLogger('SlicerCaseIterator.logic')
 
@@ -430,7 +445,10 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Variables to hold references to loaded image and mask nodes
     self.currentCase = None
 
+    self.layoutLogic = LayoutLogic.CaseIteratorLayoutLogic()
+
     self.redirect = redirect
+    self.multiViewer = multiViewer
     self._loadCase()
 
   def __del__(self):
@@ -472,25 +490,16 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       self.currentCase = self.iterator.loadCase(self.currentIdx)
       im, ma, add_im, add_ma = self.currentCase
 
-      # Set the slice viewers to the correct volumes
-      red_logic = slicer.app.layoutManager().sliceWidget('Red').sliceLogic().GetSliceCompositeNode()
-      green_logic = slicer.app.layoutManager().sliceWidget('Green').sliceLogic().GetSliceCompositeNode()
-      yellow_logic = slicer.app.layoutManager().sliceWidget('Yellow').sliceLogic().GetSliceCompositeNode()
+      if self.redirect:
+        self.iterator.backend.enter_module(im, ma)
 
-      red_logic.SetBackgroundVolumeID(im.GetID())
-      green_logic.SetBackgroundVolumeID(im.GetID())
-      yellow_logic.SetBackgroundVolumeID(im.GetID())
-
-      if len(add_im) > 0:
-        red_logic.SetForegroundVolumeID(add_im[0].GetID())
-        green_logic.SetForegroundVolumeID(add_im[0].GetID())
-        yellow_logic.SetForegroundVolumeID(add_im[0].GetID())
+      if self.multiViewer:
+        self.layoutLogic.viewerPerVolume(volumeNodes=[im] + add_im, label=ma)
+      else:
+        self.layoutLogic.viewerPerVolume(volumeNodes=[im], label=ma)
 
       # Snap the viewers to the slice plane of the main image
       self._rotateToVolumePlanes(im)
-
-      if self.redirect:
-        self.iterator.backend.enter_module(im, ma)
 
     except Exception as e:
       self.logger.warning("Error loading new case: %s", e)
