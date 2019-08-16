@@ -231,12 +231,6 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     self.currentCaseFolder = None  # Represents the currently loaded case
 
   # ------------------------------------------------------------------------------
-  def __del__(self):
-    self.logger.debug('Destroying CSV Table Iterator')
-    self.batchTable = None
-    self.caseColumns = None
-
-  # ------------------------------------------------------------------------------
   def _getColumns(self, columnMap):
     caseColumns = {}
 
@@ -371,3 +365,8 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
   # ------------------------------------------------------------------------------
   def saveMask(self, node, overwrite_existing=False):
     self._save_node(node, self.currentCaseFolder, overwrite_existing)
+
+  # ------------------------------------------------------------------------------
+  def cleanupIterator(self):
+    self.batchTable = None
+    self.caseColumns = None

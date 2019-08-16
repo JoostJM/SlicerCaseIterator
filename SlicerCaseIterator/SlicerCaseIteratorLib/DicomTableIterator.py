@@ -218,12 +218,6 @@ class DicomTableIteratorLogic(IteratorBase.IteratorLogicBase):
     self.caseCount = self.batchTable.GetNumberOfRows()  # Counter equalling the total number of cases
 
   # ------------------------------------------------------------------------------
-  def __del__(self):
-    self.logger.debug('Destroying Dicom Table Iterator')
-    self.batchTable = None
-    self.caseColumns = None
-
-  # ------------------------------------------------------------------------------
   def _getColumns(self, columnMap):
     caseColumns = {}
 
@@ -434,3 +428,8 @@ class DicomTableIteratorLogic(IteratorBase.IteratorLogicBase):
     # Save the node
     slicer.util.saveNode(node, filename)
     self.logger.info('Saved node %s in %s', nodename, filename)
+
+  # ------------------------------------------------------------------------------
+  def cleanupIterator(self):
+    self.batchTable = None
+    self.caseColumns = None

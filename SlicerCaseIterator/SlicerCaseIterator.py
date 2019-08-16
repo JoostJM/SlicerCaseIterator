@@ -17,9 +17,9 @@ import os
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
-import numpy as np
 
 from SlicerCaseIteratorLib import get_iterators, IteratorBase, LayoutLogic
+
 
 # ------------------------------------------------------------------------------
 # SlicerCaseIterator
@@ -455,6 +455,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Free up the references to the nodes to allow GC and prevent memory leaks
     self.logger.debug('Destroying Case Iterator Logic instance')
     self.currentCase = None
+    self.iterator.cleanupIterator()
     self.iterator = None
 
   # ------------------------------------------------------------------------------

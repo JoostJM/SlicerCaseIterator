@@ -123,6 +123,11 @@ class IteratorLogicBase(object):
     assert isinstance(backend, SegmentationBackend.SegmentationBackendBase)
     self.backend = backend
 
+  # ------------------------------------------------------------------------------
+  def __del__(self):
+    self.logger.debug('Destroying Iterator Logic')
+    self.cleanupIterator()
+
   @abstractmethod
   def loadCase(self, case_idx):
     """
@@ -185,3 +190,11 @@ class IteratorLogicBase(object):
     self.logger.info('Saved node %s in %s', nodename, filename)
 
     return filename
+
+  def cleanupIterator(self):
+    """
+    Function to cleanup after finishing or resetting a batch. Main objective is to remove non-needed references to
+    tracked nodes, thereby allowing their associated resources to be released and GC'ed.
+    :return: None
+    """
+    pass
