@@ -422,6 +422,10 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     else:
       target_dir = self.currentCaseFolder
 
+    if not os.path.isdir(target_dir):
+      self.logger.debug('Creating output directory at %s', target_dir)
+      os.makedirs(target_dir)
+
     nodename = node.GetName()
     # Add the readername if set
     if reader is not None:
