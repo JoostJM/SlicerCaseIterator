@@ -140,26 +140,34 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
     parametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
 
-    self.maskPropertiesCollapsibleButton = ctk.ctkCollapsibleButton()
-    self.maskPropertiesCollapsibleButton.text = 'Mask properties'
-    self.layout.addWidget(self.maskPropertiesCollapsibleButton)
+    #
+    # Visualization Properties
+    #
+    self.visualizationPropertiesCollapsibleButton = ctk.ctkCollapsibleButton()
+    self.visualizationPropertiesCollapsibleButton.text = 'Visualization properties'
+    self.layout.addWidget(self.visualizationPropertiesCollapsibleButton)
 
-    maskPropertiesFormLayout = qt.QFormLayout(self.maskPropertiesCollapsibleButton)
+    visualizationPropertiesFormLayout = qt.QVBoxLayout(self.visualizationPropertiesCollapsibleButton)
+
+    #
+    # Mask Groupbox
+    #
+    self.maskGroup = qt.QGroupBox("Mask")
+    self.maskGroup.setLayout(qt.QFormLayout())
+    visualizationPropertiesFormLayout.addWidget(self.maskGroup)
 
     self.sliceFill2DSlider = slicer.qMRMLSliderWidget()
     self.sliceFill2DSlider.minimum = 0.0
     self.sliceFill2DSlider.maximum = 1.0
     self.sliceFill2DSlider.singleStep = 0.1
-
-    maskPropertiesFormLayout.addRow("Slice 2D fill:", self.sliceFill2DSlider)
+    self.maskGroup.layout().addRow("Slice 2D fill:", self.sliceFill2DSlider)
 
     self.sliceOutline2DSlider = slicer.qMRMLSliderWidget()
     self.sliceOutline2DSlider.minimum = 0.0
     self.sliceOutline2DSlider.maximum = 1.0
     self.sliceOutline2DSlider.singleStep = 0.1
     self.sliceOutline2DSlider.value = 1.0
-
-    maskPropertiesFormLayout.addRow("Slice 2D outline:", self.sliceOutline2DSlider)
+    self.maskGroup.layout().addRow("Slice 2D outline:", self.sliceOutline2DSlider)
 
     #
     # Progressbar
@@ -198,6 +206,15 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.nextButton.enabled = False
     self.nextButton.toolTip = '(Ctrl+N) Press this button to go to the next case'
     self.caseButtonWidget.layout().addWidget(self.nextButton)
+
+    #
+    # Collapsible Button group for enabling only one at a time
+    #
+    self.collapsibleButtonGroup = qt.QButtonGroup()
+    self.collapsibleButtonGroup.setExclusive(True)
+    self.collapsibleButtonGroup.addButton(self.inputDataCollapsibleButton)
+    self.collapsibleButtonGroup.addButton(self.parametersCollapsibleButton)
+    self.collapsibleButtonGroup.addButton(self.visualizationPropertiesCollapsibleButton)
 
     self.layout.addStretch(1)
 
