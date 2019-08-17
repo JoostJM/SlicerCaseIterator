@@ -104,7 +104,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.addImsSelector = qt.QLineEdit()
     self.addImsSelector.text = ''
     self.addImsSelector.toolTip = 'Comma separated names of the columns specifying additional image files in input CSV'
-    inputParametersFormLayout.addRow('Additional images Column', self.addImsSelector)
+    inputParametersFormLayout.addRow('Additional images Column(s)', self.addImsSelector)
 
     #
     # Additional masks
@@ -112,30 +112,48 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.addMasksSelector = qt.QLineEdit()
     self.addMasksSelector.text = ''
     self.addMasksSelector.toolTip = 'Comma separated names of the columns specifying additional mask files in input CSV'
-    inputParametersFormLayout.addRow('Additional masks Column', self.addMasksSelector)
+    inputParametersFormLayout.addRow('Additional masks Column(s)', self.addMasksSelector)
 
     #
     # Connect Event Handlers
     #
-
     self.batchTableSelector.connect('nodeActivated(vtkMRMLNode*)', self.onChangeTable)
     self.imageSelector.connect('textEdited(QString)', self.onChangeImageColumn)
+
+    self.segmentationParametersGroupBox = qt.QGroupBox('Mask interaction parameters')
+    parametersFormLayout.addRow(self.segmentationParametersGroupBox)
+
+    segmentationParametersFormLayout = qt.QFormLayout(self.segmentationParametersGroupBox)
+
+    #
+    # Auto-redirect to SegmentEditor
+    #
+    self.chkAutoRedirect = qt.QCheckBox()
+    self.chkAutoRedirect.checked = False
+    self.chkAutoRedirect.toolTip = 'Automatically switch module to "SegmentEditor" when each case is loaded'
+    segmentationParametersFormLayout.addRow('Go to Segment Editor', self.chkAutoRedirect)
+
+    #
+    # Save masks
+    #
+    self.chkSaveMasks = qt.QCheckBox()
+    self.chkSaveMasks.checked = False
+    self.chkSaveMasks.toolTip = 'save all initially loaded masks when proceeding to next case'
+    segmentationParametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
+
+    #
+    # Save new masks
+    #
+    self.chkSaveNewMasks = qt.QCheckBox()
+    self.chkSaveNewMasks.checked = True
+    self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
+    segmentationParametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
 
     return self.CsvInputGroupBox
 
   # ------------------------------------------------------------------------------
   def enter(self):
     self.onChangeTable()
-
-  # ------------------------------------------------------------------------------
-  def onEndClose(self):
-    if self.tableNode is not None:
-      slicer.mrmlScene.AddNode(self.tableNode)
-      self.batchTableSelector.setCurrentNode(self.tableNode)
-      self.batchTableView.setMRMLTableNode(self.tableNode)
-      if self.tableStorageNode is not None:
-        slicer.mrmlScene.AddNode(self.tableStorageNode)
-        self.tableNode.SetAndObserveStorageNodeID(self.tableStorageNode.GetID())
 
   # ------------------------------------------------------------------------------
   def is_valid(self):
@@ -147,7 +165,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     return self.batchTableSelector.currentNodeID != '' and self.imageSelector.text != ''
 
   # ------------------------------------------------------------------------------
-  def startBatch(self):
+  def startBatch(self, reader=None):
     """
     Function to start the batch. In the derived class, this should store relevant nodes to keep track of important data
     :return: instance of an Iterator class defining the dataset to iterate over, and function for loading/storing a case
@@ -157,12 +175,21 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 
     columnMap = self._parseConfig()
 
-    return CaseTableIteratorLogic(self.tableNode, columnMap)
+    self._iterator = CaseTableIteratorLogic(self.tableNode, columnMap)
+    self._iterator.registerEventListener(
+      CsvTableEventHandler(reader=reader,
+                           redirect=self.chkAutoRedirect.checked,
+                           saveNew=self.chkSaveNewMasks.checked,
+                           saveLoaded=self.chkSaveMasks.checked)
+    )
+    return self._iterator
 
   # ------------------------------------------------------------------------------
   def cleanupBatch(self):
+    self._iterator.closeCase()
     self.tableNode = None
     self.tableStorageNode = None
+    self._iterator = None
 
   # ------------------------------------------------------------------------------
   def onChangeTable(self):
@@ -224,10 +251,10 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     self.caseColumns = self._getColumns(columnMap)
 
     self.caseCount = self.batchTable.GetNumberOfRows()  # Counter equalling the total number of cases
-    self.currentCaseFolder = None  # Represents the currently loaded case
 
   # ------------------------------------------------------------------------------
   def __del__(self):
+    super(CaseTableIteratorLogic, self).__del__()
     self.logger.debug('Destroying CSV Table Iterator')
     self.batchTable = None
     self.caseColumns = None
@@ -273,6 +300,9 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
   def loadCase(self, case_idx):
     assert 0 <= case_idx < self.caseCount, 'case_idx %d is out of range (n cases: %d)' % (case_idx, self.caseCount)
 
+    if self.currentIdx is not None:
+      self.closeCase()
+
     if 'patient' in self.caseColumns:
       patient = self.caseColumns['patient'].GetValue(case_idx)
       self.logger.info('Loading patient (%d/%d): %s...', case_idx + 1, self.caseCount, patient)
@@ -285,7 +315,6 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     im = self._getColumnValue('image', case_idx)
     im_node = self._loadImageNode(root, im)
     assert im_node is not None, 'Failed to load main image'
-    self.currentCaseFolder = os.path.dirname(im_node.GetStorageNode().GetFileName())
 
     additionalImageNodes = []
     for im in self._getColumnValue('additionalImages', case_idx, True):
@@ -306,7 +335,41 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
       if add_ma_node is not None:
         additionalMaskNodes.append(add_ma_node)
 
-    return im_node, ma_node, additionalImageNodes, additionalMaskNodes
+    self.parameterNode.SetParameter("CaseData", {
+      "InputImage_ID": im_node.GetID(),
+      "InputMask_ID": ma_node.GetID(),
+      "Additional_InputImage_IDs": [node.GetID() for node in additionalImageNodes],
+      "Additional_InputMask_IDs": [node.GetID() for node in additionalMaskNodes],
+    }.__str__())
+
+    self.currentIdx = case_idx
+
+    self._eventListeners.caseLoaded(self.parameterNode)
+    return True
+
+  def closeCase(self):
+    self._eventListeners.caseAboutToClose(self.parameterNode)
+    caseData = eval(self.parameterNode.GetParameter("CaseData"))
+
+    self.removeNodeByID(caseData["InputImage_ID"])
+    self.removeNodeByID(caseData["InputMask_ID"])
+    map(self.removeNodeByID, caseData["Additional_InputImage_IDs"])
+    map(self.removeNodeByID, caseData["Additional_InputMask_IDs"])
+    self.currentIdx = None
+
+  def getCaseData(self):
+    """
+    :return: image node, mask node, additional image nodes, additional mask nodes
+    """
+    if self.parameterNode:
+      caseData = eval(self.parameterNode.GetParameter("CaseData"))
+      im = slicer.mrmlScene.GetNodeByID(caseData["InputImage_ID"])
+      ma = slicer.mrmlScene.GetNodeByID(caseData["InputMask_ID"])
+      add_im = list(map(slicer.mrmlScene.GetNodeByID, caseData["Additional_InputImage_IDs"]))
+      add_ma = list(map(slicer.mrmlScene.GetNodeByID, caseData["Additional_InputMask_IDs"]))
+      return im, ma, add_im, add_ma
+    else:
+      return [None] * 4
 
   # ------------------------------------------------------------------------------
   def _getColumnValue(self, colName, idx, is_list=False):
@@ -414,17 +477,91 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
     return ma_node
 
+
+class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
+
+  def __init__(self, redirect, reader=None, saveNew=False, saveLoaded=False):
+    super(CsvTableEventHandler, self).__init__()
+
+    # Some variables that control the output (formatting and control of discarding/saving
+    self.redirect = redirect
+    self.reader = reader
+    self.saveNew = saveNew
+    self.saveLoaded = saveLoaded
+
+  @staticmethod
+  def _rotateToVolumePlanes(referenceVolume):
+    sliceNodes = slicer.util.getNodes('vtkMRMLSliceNode*')
+    for name, node in sliceNodes.items():
+      node.RotateToVolumePlane(referenceVolume)
+    # Snap to IJK to try and avoid rounding errors
+    sliceLogics = slicer.app.layoutManager().mrmlSliceLogics()
+    numLogics = sliceLogics.GetNumberOfItems()
+    for n in range(numLogics):
+      l = sliceLogics.GetItemAsObject(n)
+      l.SnapSliceOffsetToIJK()
+
+  def onCaseLoaded(self, caller, *args, **kwargs):
+    try:
+      im, ma, add_im, add_ma = caller.getCaseData()
+
+      # Set the slice viewers to the correct volumes
+      for sliceWidgetName in ['Red', 'Green', 'Yellow']:
+        logic = slicer.app.layoutManager().sliceWidget(sliceWidgetName).sliceLogic().GetSliceCompositeNode()
+        logic.SetBackgroundVolumeID(im.GetID())
+        if len(add_im) > 0:
+          logic.SetForegroundVolumeID(add_im[0].GetID())
+
+      # Snap the viewers to the slice plane of the main image
+      self._rotateToVolumePlanes(im)
+
+      # the following code should go somewhere in a separate class including the save part
+      if self.redirect:
+        if slicer.util.selectedModule() != 'SegmentEditor':
+          slicer.util.selectModule('SegmentEditor')
+        else:
+          slicer.modules.SegmentEditorWidget.enter()
+
+        # Explicitly set the segmentation and master volume nodes
+        segmentEditorWidget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
+        if ma is not None:
+          segmentEditorWidget.setSegmentationNode(ma)
+        segmentEditorWidget.setMasterVolumeNode(im)
+
+    except Exception as e:
+      self.logger.warning("Error loading new case: %s", e.message)
+      self.logger.debug('', exc_info=True)
+
+  def onCaseAboutToClose(self, caller, *args, **kwargs):
+    caseData = caller.getCaseData()
+    _, mask, _, additionalMasks = caseData
+    if self.saveLoaded:
+      if mask is not None:
+        self.saveMask(mask, self.reader, caseData)
+      for ma in additionalMasks:
+        self.saveMask(ma, self.reader, caseData)
+    if self.saveNew:
+      # TODO: this should depend on if more segments were added in segmentation node not depending on a new
+      nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode')
+               if n not in additionalMasks and n != mask]
+
+      map(lambda n: self.saveMask(n, self.reader, caseData), nodes)
+
+    if slicer.util.selectedModule() == 'SegmentEditor':
+      slicer.modules.SegmentEditorWidget.exit()
+
   # ------------------------------------------------------------------------------
-  def saveMask(self, node, reader, overwrite_existing=False):
+  def saveMask(self, node, reader, caseData, overwrite_existing=False):
     storage_node = node.GetStorageNode()
     if storage_node is not None and storage_node.GetFileName() is not None:
       # mask was loaded, save the updated mask in the same directory
       target_dir = os.path.dirname(storage_node.GetFileName())
     else:
-      target_dir = self.currentCaseFolder
+      im_node, _, _, _ = caseData
+      target_dir = os.path.dirname(im_node.GetStorageNode().GetFileName())
 
     nodename = node.GetName()
-    # Add the readername if set
+
     if reader is not None:
       nodename += '_' + reader
     filename = os.path.join(target_dir, nodename)
