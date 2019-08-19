@@ -11,11 +11,9 @@
 #  limitations under the License.
 # ========================================================================
 
-import os
-
 import vtk, qt, ctk, slicer
 
-from . import IteratorBase
+from . import IteratorBase, SegmentationBackend
 
 # ------------------------------------------------------------------------------
 # SlicerCaseIterator CSV iterator Widget
@@ -196,54 +194,30 @@ class DicomTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 # ------------------------------------------------------------------------------
 
 
-class DicomTableIteratorLogic(IteratorBase.IteratorLogicBase):
+class DicomTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
 
   def __init__(self, reader, tableNode, columnMap):
-    super(DicomTableIteratorLogic, self).__init__(reader)
-    assert tableNode is not None, 'No table selected! Cannot instantiate batch'
+    super(DicomTableIteratorLogic, self).__init__(reader,
+                                                  SegmentationBackend.SegmentEditorBackend(),
+                                                  tableNode,
+                                                  None)
 
-    # If the table was loaded from a file, get the directory containing the file as reference for relative paths
-    tableStorageNode = tableNode.GetStorageNode()
-    if tableStorageNode is not None and tableStorageNode.GetFileName() is not None:
-      self.csv_dir = os.path.dirname(tableStorageNode.GetFileName())
-    else:  # Table did not originate from a file
-      self.csv_dir = None
+    required_columns = []
+    self.mainSeries = columnMap['mainSeries']
+    required_columns.append(self.mainSeries)
 
-    # Get the actual table contained in the MRML node
-    self.batchTable = tableNode.GetTable()
+    self.mainMask = columnMap.get('mainMask', None)
+    required_columns.append(self.mainMask)
 
-    # Dictionary holding the specified (and found) columns from the tableNode
-    self.caseColumns = self._getColumns(columnMap)
+    self.additionalSeries = columnMap.get('additionalSeries', [])
+    required_columns += self.additionalSeries
+
+    self.additionalMasks = columnMap.get('additionalMasks', [])
+    required_columns += self.additionalMasks
+
+    self.checkColumns(required_columns)
 
     self.caseCount = self.batchTable.GetNumberOfRows()  # Counter equalling the total number of cases
-
-  # ------------------------------------------------------------------------------
-  def _getColumns(self, columnMap):
-    caseColumns = {}
-
-    # Declare temporary function to parse out the user config and get the correct columns from the batchTable
-    def getColumn(key):
-      col = None
-      if key in columnMap:
-        col = self.batchTable.GetColumnByName(columnMap[key])
-        assert col is not None, 'Unable to find column "%s" (key %s)' % (columnMap[key], key)
-      caseColumns[key] = col
-    def getListColumn(key):
-      col_list = []
-      if key in columnMap:
-        for c_key in columnMap[key]:
-          col = self.batchTable.GetColumnByName(c_key)
-          assert col is not None, 'Unable to find column "%s" (key %s)' % (c_key, key)
-          col_list.append(col)
-      caseColumns[key] = col_list
-
-    # Get the other configurable columns
-    getColumn('mainSeries')
-    getColumn('mainMask')
-    getListColumn('additionalSeries')
-    getListColumn('additionalMasks')
-
-    return caseColumns
 
   # ------------------------------------------------------------------------------
   def loadCase(self, case_idx):
@@ -252,7 +226,8 @@ class DicomTableIteratorLogic(IteratorBase.IteratorLogicBase):
     self.logger.debug('Starting load of case %i', case_idx)
 
     # Load images
-    series = self._getColumnValue('mainSeries', case_idx)
+    series = self.getColumnValue(self.mainSeries, case_idx)
+
     study = slicer.dicomDatabase.studyForSeries(series)
     patient = slicer.dicomDatabase.patientForStudy(study)
     pt_name = slicer.dicomDatabase.nameForPatient(patient)
@@ -267,7 +242,10 @@ class DicomTableIteratorLogic(IteratorBase.IteratorLogicBase):
     assert load_success, 'Failed to load main image (%s)' % series_description
 
     additionalSeriesNodes = []
-    for series in self._getColumnValue('additionalSeries', case_idx, True):
+    for additional_series in self.additionalSeries:
+      series = self.getColumnValue(additional_series, case_idx)
+      if series is None:
+        continue
       series_description = slicer.dicomDatabase.descriptionForSeries(series)
       filenames = slicer.dicomDatabase.filesForSeries(series)
 
@@ -276,98 +254,21 @@ class DicomTableIteratorLogic(IteratorBase.IteratorLogicBase):
         additionalSeriesNodes.append(add_se_node)
 
     # Load masks
-    ma = self._getColumnValue('mainMask', case_idx)
-    if ma is not None:
-      ma_node = self._loadMaskNode(ma, series_node)
-    else:
-      ma_node = None
+    ma = self.getColumnValue(self.mainMask, case_idx)
+    ma_path = self.buildPath(ma)
+    ma_node = self.backend.loadMask(ma_path, series_node)
 
     additionalMaskNodes = []
-    for ma in self._getColumnValue('additionalMasks', case_idx, True):
-      add_ma_node = self._loadMaskNode(root, ma)
+    for additional_mask in self.additionalMasks:
+      ma = self.getColumnValue(additional_mask, case_idx)
+      ma_path = self.buildPath(ma)
+      add_ma_node = self.backend.loadMask(ma_path)
       if add_ma_node is not None:
         additionalMaskNodes.append(add_ma_node)
 
     return series_node, ma_node, additionalSeriesNodes, additionalMaskNodes
 
   # ------------------------------------------------------------------------------
-  def _getColumnValue(self, colName, idx, is_list=False):
-    if colName not in self.caseColumns or self.caseColumns[colName] is None:
-      return None
-
-    if is_list:
-      return [col.GetValue(idx) for col in self.caseColumns[colName]]
-    else:
-      return self.caseColumns[colName].GetValue(idx)
-
-  # ------------------------------------------------------------------------------
-  def _buildPath(self, fname):
-    if fname is None or fname == '':
-      return None
-
-    if os.path.isabs(fname):
-      return fname
-
-    # Add the csv_dir to the path if it is not None (loaded table)
-    if self.csv_dir is not None:
-      fname = os.path.join(self.csv_dir, fname)
-
-    return os.path.abspath(fname)
-
-  # ------------------------------------------------------------------------------
-  def _loadMaskNode(self, fname, ref_im=None):
-    ma_path = self._buildPath(fname)
-    if ma_path is None:
-      return None
-
-    # Check if the file actually exists
-    if not os.path.isfile(ma_path):
-      self.logger.warning('Segmentation file %s does not exist, skipping...', fname)
-      return None
-
-    # Determine if file is segmentation based on extension
-    isSegmentation = os.path.splitext(ma_path)[0].endswith('.seg')
-    # Try to load the mask
-    if isSegmentation:
-      self.logger.debug('Loading segmentation')
-      load_success, ma_node = slicer.util.loadSegmentation(ma_path, returnNode=True)
-    else:
-      self.logger.debug('Loading labelmap and converting to segmentation')
-      # If not segmentation, then load as labelmap then convert to segmentation
-      load_success, ma_node = slicer.util.loadLabelVolume(ma_path, returnNode=True)
-      if load_success:
-        # Only try to make a segmentation node if Slicer was able to load the label map
-        seg_node = slicer.vtkMRMLSegmentationNode()
-        slicer.mrmlScene.AddNode(seg_node)
-        seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_im)
-        load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node)
-        slicer.mrmlScene.RemoveNode(ma_node)
-        ma_node = seg_node
-
-        # Add a storage node for this segmentation node
-        file_base, ext = os.path.splitext(ma_path)
-        store_node = seg_node.CreateDefaultStorageNode()
-        slicer.mrmlScene.AddNode(store_node)
-        seg_node.SetAndObserveStorageNodeID(store_node.GetID())
-
-        store_node.SetFileName('%s.seg%s' % (file_base, ext))
-
-        # UnRegister the storage node to prevent a memory leak
-        store_node.UnRegister(None)
-
-    if not load_success:
-      self.logger.warning('Failed to load ' + ma_path)
-      return None
-
-    # Use the file basename as the name for the newly loaded segmentation node
-    file_base = os.path.splitext(os.path.basename(ma_path))[0]
-    if isSegmentation:
-      # split off .seg
-      file_base = os.path.splitext(file_base)[0]
-    ma_node.SetName(file_base)
-
-    return ma_node
-
   def _tryLoadDICOMSeries(self, seriesdescription, filenames):
     """
     Function to examine filenames and attempt to get a valid loadable to get the DICOM series.
@@ -376,7 +277,7 @@ class DicomTableIteratorLogic(IteratorBase.IteratorLogicBase):
     :return: (Boolean indicating if the load was successful, loaded node)
     """
     if len(filenames) == 0:
-      self.logger.warning('No files found for SeriesUID %s' % seriesdescription)
+      self.logger.warning('No files found for Series %s' % seriesdescription)
       return False, None
 
     self.logger.debug('Found %i files for series %s', len(filenames), seriesdescription)
@@ -397,39 +298,13 @@ class DicomTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
   # ------------------------------------------------------------------------------
   def saveMask(self, node, overwrite_existing=False):
-    storage_node = node.GetStorageNode()
-    if storage_node is not None and storage_node.GetFileName() is not None:
-      # mask was loaded, save the updated mask in the same directory
-      target_dir = os.path.dirname(storage_node.GetFileName())
-    else:
-      target_dir = self.csv_dir
-
-    if not os.path.isdir(target_dir):
-      self.logger.debug('Creating output directory at %s', target_dir)
-      os.makedirs(target_dir)
-
-    nodename = node.GetName()
-    # Add the readername if set
-    if self.reader is not None:
-      nodename += '_' + self.reader
-    filename = os.path.join(target_dir, nodename)
-
-    # Prevent overwriting existing files
-    if os.path.exists(filename + '.seg.nrrd') and not overwrite_existing:
-      self.logger.debug('Filename exists! Generating unique name...')
-      idx = 1
-      filename += '(%d).seg.nrrd'
-      while os.path.exists(filename % idx):
-        idx += 1
-      filename = filename % idx
-    else:
-      filename += '.seg.nrrd'
-
-    # Save the node
-    slicer.util.saveNode(node, filename)
-    self.logger.info('Saved node %s in %s', nodename, filename)
+    self._save_node(node, self.csv_dir, overwrite_existing)
 
   # ------------------------------------------------------------------------------
   def cleanupIterator(self):
-    self.batchTable = None
-    self.caseColumns = None
+    super(DicomTableIteratorLogic, self).cleanupIterator()
+
+    self.mainSeries = None
+    self.mainMask = None
+    self.additionalSeries = None
+    self.additionalMasks = None

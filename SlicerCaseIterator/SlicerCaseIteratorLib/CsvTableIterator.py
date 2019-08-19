@@ -208,143 +208,84 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 # ------------------------------------------------------------------------------
 
 
-class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
+class CaseTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
 
   def __init__(self, reader, tableNode, columnMap):
-    super(CaseTableIteratorLogic, self).__init__(reader, SegmentationBackend.SegmentEditorBackend())
-    assert tableNode is not None, 'No table selected! Cannot instantiate batch'
+    super(CaseTableIteratorLogic, self).__init__(reader,
+                                                 SegmentationBackend.SegmentEditorBackend(),
+                                                 tableNode,
+                                                 None)
+    required_columns = []
+    self.mainImage = columnMap['image']
+    required_columns.append(self.mainImage)
 
-    # If the table was loaded from a file, get the directory containing the file as reference for relative paths
-    tableStorageNode = tableNode.GetStorageNode()
-    if tableStorageNode is not None and tableStorageNode.GetFileName() is not None:
-      self.csv_dir = os.path.dirname(tableStorageNode.GetFileName())
-    else:  # Table did not originate from a file
-      self.csv_dir = None
+    self.mainMask = columnMap.get('mask', None)
+    required_columns.append(self.mainMask)
 
-    # Get the actual table contained in the MRML node
-    self.batchTable = tableNode.GetTable()
+    self.additionalImages = columnMap.get('additionalImages', [])
+    required_columns += self.additionalImages
 
-    # Dictionary holding the specified (and found) columns from the tableNode
-    self.caseColumns = self._getColumns(columnMap)
+    self.additionalMasks = columnMap.get('additionalMasks', [])
+    required_columns += self.additionalMasks
+
+    self.root = columnMap.get('root', None)
+    required_columns.append(self.root)
+
+    if self.batchTable.GetColumnByName('patient') is not None:
+      self.patient = 'patient'
+    elif self.batchTable.GetColumnByName('ID') is not None:
+      self.patient = 'ID'
+    else:
+      self.patient = None
+
+    self.checkColumns(required_columns)
 
     self.caseCount = self.batchTable.GetNumberOfRows()  # Counter equalling the total number of cases
     self.currentCaseFolder = None  # Represents the currently loaded case
 
   # ------------------------------------------------------------------------------
-  def _getColumns(self, columnMap):
-    caseColumns = {}
-
-    # Declare temporary function to parse out the user config and get the correct columns from the batchTable
-    def getColumn(key):
-      col = None
-      if key in columnMap:
-        col = self.batchTable.GetColumnByName(columnMap[key])
-        assert col is not None, 'Unable to find column "%s" (key %s)' % (columnMap[key], key)
-      caseColumns[key] = col
-    def getListColumn(key):
-      col_list = []
-      if key in columnMap:
-        for c_key in columnMap[key]:
-          col = self.batchTable.GetColumnByName(c_key)
-          assert col is not None, 'Unable to find column "%s" (key %s)' % (c_key, key)
-          col_list.append(col)
-      caseColumns[key] = col_list
-
-    # Special case: Check if there is a column "patient" or "ID" (used for additional naming of the case during logging)
-    patientColumn = self.batchTable.GetColumnByName('patient')
-    if patientColumn is None:
-      patientColumn = self.batchTable.GetColumnByName('ID')
-    if patientColumn is not None:
-      caseColumns['patient'] = patientColumn
-
-    # Get the other configurable columns
-    getColumn('root')
-    getColumn('image')
-    getColumn('mask')
-    getListColumn('additionalImages')
-    getListColumn('additionalMasks')
-
-    return caseColumns
-
-  # ------------------------------------------------------------------------------
   def loadCase(self, case_idx):
     assert 0 <= case_idx < self.caseCount, 'case_idx %d is out of range (n cases: %d)' % (case_idx, self.caseCount)
 
-    if 'patient' in self.caseColumns:
-      patient = self.caseColumns['patient'].GetValue(case_idx)
+    patient = self.getColumnValue(self.patient, case_idx)
+    if patient is not None:
       self.logger.info('\nLoading patient (%d/%d): %s...', case_idx + 1, self.caseCount, patient)
     else:
       self.logger.info('\nLoading patient (%d/%d)...', case_idx + 1, self.caseCount)
 
-    root = self._getColumnValue('root', case_idx)
+    root = self.getColumnValue(self.root, case_idx)
 
     # Load images
-    im = self._getColumnValue('image', case_idx)
+    im = self.getColumnValue(self.mainImage, case_idx)
     im_node = self._loadImageNode(root, im)
     assert im_node is not None, 'Failed to load main image'
     self.currentCaseFolder = os.path.dirname(im_node.GetStorageNode().GetFileName())
 
     additionalImageNodes = []
-    for im in self._getColumnValue('additionalImages', case_idx, True):
+    for additional_image in self.additionalImages:
+      im = self.getColumnValue(additional_image, case_idx)
       add_im_node = self._loadImageNode(root, im)
       if add_im_node is not None:
         additionalImageNodes.append(add_im_node)
 
     # Load masks
-    ma_node = None
-    ma = self._getColumnValue('mask', case_idx)
-    if ma is not None:
-      ma_path = self._buildPath(root, ma)
-      if ma_path is not None:
-        ma_node = self.backend.loadMask(ma_path, im_node)
+    ma = self.getColumnValue(self.mainMask, case_idx)
+    ma_path = self.buildPath(ma, root)
+    ma_node = self.backend.loadMask(ma_path, im_node)
 
     additionalMaskNodes = []
-    for ma in self._getColumnValue('additionalMasks', case_idx, True):
-      ma_path = self._buildPath(root, ma)
-      if ma_path is None:
-        continue
-
+    for additional_mask in self.additionalMasks:
+      ma = self.getColumnValue(additional_mask, case_idx)
+      ma_path = self.buildPath(ma, root)
       add_ma_node = self.backend.loadMask(ma_path)
       if add_ma_node is not None:
         additionalMaskNodes.append(add_ma_node)
 
     return im_node, ma_node, additionalImageNodes, additionalMaskNodes
 
-  # ------------------------------------------------------------------------------
-  def _getColumnValue(self, colName, idx, is_list=False):
-    if colName not in self.caseColumns or self.caseColumns[colName] is None:
-      return None
-
-    if is_list:
-      return [col.GetValue(idx) for col in self.caseColumns[colName]]
-    else:
-      return self.caseColumns[colName].GetValue(idx)
-
-  # ------------------------------------------------------------------------------
-  def _buildPath(self, caseRoot, fname):
-    if fname is None or fname == '':
-      return None
-
-    if os.path.isabs(fname):
-      return fname
-
-    # Add the caseRoot if specified
-    if caseRoot is not None:
-      fname = os.path.join(caseRoot, fname)
-
-      # Check if the caseRoot is an absolute path
-      if os.path.isabs(fname):
-        return fname
-
-    # Add the csv_dir to the path if it is not None (loaded table)
-    if self.csv_dir is not None:
-      fname = os.path.join(self.csv_dir, fname)
-
-    return os.path.abspath(fname)
-
-  # ------------------------------------------------------------------------------
+  #   # ------------------------------------------------------------------------------
   def _loadImageNode(self, root, fname):
-    im_path = self._buildPath(root, fname)
+    im_path = self.buildPath(fname, root)
     if im_path is None:
       return None
 
@@ -368,5 +309,11 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
   # ------------------------------------------------------------------------------
   def cleanupIterator(self):
-    self.batchTable = None
-    self.caseColumns = None
+    super(CaseTableIteratorLogic, self).cleanupIterator()
+
+    self.mainImage = None
+    self.mainMask = None
+    self.additionalImages = None
+    self.additionalMasks = None
+    self.root = None
+    self.patient = None

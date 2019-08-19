@@ -435,7 +435,8 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Iterator class defining the iterable to iterate over cases
     assert isinstance(iterator, IteratorBase.IteratorLogicBase)
     self.iterator = iterator
-    assert self.iterator.caseCount >= start, 'No cases to process (%d cases, start %d)' % (self.iterator.caseCount, start)
+    assert self.iterator.caseCount >= start, \
+        'No cases to process (%d cases, start %d)' % (self.iterator.caseCount, start)
     self.currentIdx = start - 1  # Current case index (starts at 0 for fist case, -1 means nothing loaded)
 
     # Some variables that control the output (formatting and control of discarding/saving
@@ -449,7 +450,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
     self.redirect = redirect
     self.multiViewer = multiViewer
-    self._loadCase()
+    self._loadCase(self.currentIdx)
 
   def __del__(self):
     # Free up the references to the nodes to allow GC and prevent memory leaks
@@ -460,35 +461,32 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
   # ------------------------------------------------------------------------------
   def nextCase(self):
-    self.currentIdx += 1
-    return self._loadCase()
+    return self._loadCase(self.currentIdx + 1)
 
   def previousCase(self):
-    self.currentIdx -= 1
-    return self._loadCase()
+    return self._loadCase(self.currentIdx - 1)
 
-  def _loadCase(self):
+  def _loadCase(self, new_idx):
     """
     This function proceeds to the next case. If a current case is open, it is saved if necessary and then closed.
     Next, a new case is obtained from the iterator, which is then loaded as the new ``currentCase``.
     If the last case was loaded, the iterator exits and resets the GUI to allow for loading a new batch of cases.
     :return: Boolean indicating whether the end of the batch is reached
     """
-    if self.currentIdx < 0:
-      self.currentIdx = 0
-      # Cannot select a negative index, so give a warning and exit the function
-      self.logger.warning('First case selected, cannot select previous case!')
-      return False
-
-    if self.currentCase is not None:
-      self._closeCase()
-
-    if self.currentIdx >= self.iterator.caseCount:
-      self.logger.info('########## All Done! ##########')
-      return True
-
     try:
-      self.currentCase = self.iterator.loadCase(self.currentIdx)
+      if new_idx < 0:
+        # Cannot select a negative index, so give a warning and exit the function
+        self.logger.warning('First case selected, cannot select previous case!')
+        return False
+
+      if self.currentCase is not None:
+        self._closeCase(new_idx)
+
+      if new_idx >= self.iterator.caseCount:
+        self.logger.info('########## All Done! ##########')
+        return True
+
+      self.currentCase = self.iterator.loadCase(new_idx)
       im, ma, add_im, add_ma = self.currentCase
 
       if self.redirect:
@@ -499,15 +497,14 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       else:
         self.layoutLogic.viewerPerVolume(volumeNodes=[im], label=ma)
 
-      # Snap the viewers to the slice plane of the main image
-      self._rotateToVolumePlanes(im)
+      self.currentIdx = new_idx
 
     except Exception as e:
       self.logger.warning("Error loading new case: %s", e)
       self.logger.debug('', exc_info=True)
     return False
 
-  def _closeCase(self):
+  def _closeCase(self, new_idx):
     _, mask, _, additionalMasks = self.currentCase
     if self.saveLoaded:
       if mask is not None:
@@ -525,7 +522,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
     self.iterator.backend.exit_module()
 
-    if self.iterator.should_close(self.currentIdx):
+    if self.iterator.should_close(new_idx):
       # Close the scene and start a fresh one
       self.logger.debug("Closing scene and starting a new one")
       slicer.mrmlScene.Clear(0)
@@ -536,15 +533,3 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       self.logger.debug("Removing segmentation nodes from current scene")
       for n in self.iterator.backend.getMaskNodes():
         slicer.mrmlScene.RemoveNode(n)
-
-  # ------------------------------------------------------------------------------
-  def _rotateToVolumePlanes(self, referenceVolume):
-    sliceNodes = slicer.util.getNodes('vtkMRMLSliceNode*')
-    for name, node in sliceNodes.items():
-      node.RotateToVolumePlane(referenceVolume)
-    # Snap to IJK to try and avoid rounding errors
-    sliceLogics = slicer.app.layoutManager().mrmlSliceLogics()
-    numLogics = sliceLogics.GetNumberOfItems()
-    for n in range(numLogics):
-      l = sliceLogics.GetItemAsObject(n)
-      l.SnapSliceOffsetToIJK()

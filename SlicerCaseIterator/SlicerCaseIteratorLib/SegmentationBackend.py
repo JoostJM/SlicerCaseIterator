@@ -95,6 +95,9 @@ class EditorBackend(SegmentationBackendBase):
     :param ref_image: master volume node that should serve as reference for the loaded mask
     :return: node representing the loaded mask, None if loading failed.
     """
+    if mask_path is None:
+      return None
+
     # Check if the file actually exists
     if not os.path.isfile(mask_path):
       self.logger.warning('Segmentation file %s does not exist, skipping...', mask_path)
@@ -200,6 +203,9 @@ class SegmentEditorBackend(SegmentationBackendBase):
     :param ref_image: master volume node that should serve as reference for the loaded mask
     :return: node representing the loaded mask, None if loading failed.
     """
+    if mask_path is None:
+      return None
+
     # Check if the file actually exists
     if not os.path.isfile(mask_path):
       self.logger.warning('Segmentation file %s does not exist, skipping...', mask_path)
