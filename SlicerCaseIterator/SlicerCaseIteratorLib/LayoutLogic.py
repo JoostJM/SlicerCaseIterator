@@ -101,11 +101,11 @@ class CaseIteratorLayoutLogic(ScriptedLoadableModuleLogic):
       # - 5 volumes 3x2 with only two volumes in second row
       additional_volume_cnt = len(volumeNodes) - 1
 
-      r = math.sqrt(additional_volume_cnt)
-      rows = np.floor(r)
-      columns = additional_volume_cnt // rows
+      c = math.sqrt(additional_volume_cnt)
+      columns = np.floor(c)
+      rows = additional_volume_cnt // columns
       if columns * rows < additional_volume_cnt:
-        columns += 1
+        rows += 1
     else:
       rows = 0
       columns = 0
