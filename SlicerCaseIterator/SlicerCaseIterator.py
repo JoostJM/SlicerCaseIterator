@@ -13,8 +13,11 @@
 
 import logging
 
-import qt, ctk, slicer
+import os, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
+
+from SlicerDevelopmentToolboxUtils.buttons import *
+from SlicerDevelopmentToolboxUtils.mixins import ModuleWidgetMixin
 
 from SlicerCaseIteratorLib import IteratorBase, CsvTableIterator
 from SlicerCaseIteratorLib.IteratorFactory import IteratorFactory
@@ -32,7 +35,7 @@ class SlicerCaseIterator(ScriptedLoadableModule):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = 'Case Iterator'
     self.parent.categories = ['Utilities']
-    self.parent.dependencies = []
+    self.parent.dependencies = ["SlicerDevelopmentToolbox", "SegmentComparison"]
     self.parent.contributors = ["Joost van Griethuysen (AVL-NKI), Christian Herz (CHOP)"]
     self.parent.helpText = """
     This is a scripted loadable module to iterate over a batch of images (with/without prior segmentations) for 
@@ -57,8 +60,17 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.inputWidget = None
     self._disconnectHandlers()
 
+  def onReload(self):
+    if hasattr(self, 'inputWidget'):
+      self.inputWidget = None
+
+    IteratorFactory.reloadSourceFiles()
+    ScriptedLoadableModuleWidget.onReload(self)
+
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
+
+    self.setupViewSettingsArea()
 
     # Setup a logger for the extension log messages
     self.logger = logging.getLogger('SlicerCaseIterator')
@@ -75,10 +87,14 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     #
     # ComboBox for mode selection
     #
+    self.modeGroup = qt.QGroupBox("Mode Selection")
+    self.modeGroup.setLayout(qt.QFormLayout())
+    self.layout.addWidget(self.modeGroup)
+
     modes = IteratorFactory.getImplementationNames()
     self.modeComboBox = qt.QComboBox()
-    self.modeComboBox.addItems(modes)
-    self.layout.addWidget(self.modeComboBox)
+    self.modeComboBox.addItems([""] + modes)
+    self.modeGroup.layout().addWidget(self.modeComboBox)
 
     #
     # Select and Load input data section
@@ -206,16 +222,19 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     if len(modes) == 1:
       self.modeComboBox.hide()
-      self.onModeSelected(modes[0])
-    else:
-      self.modeComboBox.show()
+      self.onModeSelected(modes[1])
 
     self._setGUIstate(csv_loaded=False)
 
-  def onReload(self):
-    if hasattr(self, 'inputWidget'):
-      self.inputWidget = None
-    ScriptedLoadableModuleWidget.onReload(self)
+  def setupViewSettingsArea(self):
+    self.fourUpSliceLayoutButton = FourUpLayoutButton()
+    self.fourUpSliceTableViewLayoutButton = FourUpTableViewLayoutButton()
+    self.crosshairButton = CrosshairButton()
+    self.crosshairButton.setSliceIntersectionEnabled(True)
+
+    hbox = ModuleWidgetMixin.createHLayout([self.fourUpSliceLayoutButton,
+                                            self.fourUpSliceTableViewLayoutButton, self.crosshairButton])
+    self.layout.addWidget(hbox)
 
   # ------------------------------------------------------------------------------
   def enter(self):
@@ -231,6 +250,9 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     inputDataFormLayout = qt.QFormLayout(self.inputDataCollapsibleButton)
     self.inputParametersGroupBox = self.inputWidget.setup()
     inputDataFormLayout.addRow(self.inputParametersGroupBox)
+
+    self.modeGroup.hide()
+    self.inputDataCollapsibleButton.click()
 
   # ------------------------------------------------------------------------------
   def onValidateInput(self, is_valid):
@@ -324,7 +346,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self._connectHandlers()
     else:
       # reset Button is locked when loading cases, ensure it is unlocked to load new batch
-      self.resetButton.enabled = self.inputWidget.is_valid()
+      self.resetButton.enabled = hasattr(self, 'inputWidget') and self.inputWidget.is_valid()
       self.resetButton.text = 'Start Batch'
 
       self._disconnectHandlers()
@@ -333,7 +355,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.previousButton.enabled = csv_loaded
     self.nextButton.enabled = csv_loaded
 
-    self.inputParametersGroupBox.enabled = not csv_loaded
+    if hasattr(self, 'inputParametersGroupBox'):
+      self.inputParametersGroupBox.enabled = not csv_loaded
 
   # ------------------------------------------------------------------------------
   def _connectHandlers(self):

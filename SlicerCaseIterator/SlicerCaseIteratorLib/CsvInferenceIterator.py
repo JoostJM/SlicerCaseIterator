@@ -1,19 +1,7 @@
-# =========================================================================
-#  Copyright Joost van Griethuysen
-#
-#  Licensed under the 3-Clause BSD-License (the "License");
-#  you may not use this file except in compliance with the License.
-#
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
-# ========================================================================
-
 import os
+from collections import OrderedDict
 
-import qt, ctk, slicer
+import vtk, qt, ctk, slicer
 
 from . import IteratorBase
 
@@ -22,10 +10,10 @@ from . import IteratorBase
 # ------------------------------------------------------------------------------
 
 
-class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
+class CsvInferenceIteratorWidget(IteratorBase.IteratorWidgetBase):
 
   def __init__(self):
-    super(CaseTableIteratorWidget, self).__init__()
+    super(CsvInferenceIteratorWidget, self).__init__()
 
     self.tableNode = None
     self.tableStorageNode = None
@@ -50,24 +38,23 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.batchTableSelector.toolTip = 'Select the table representing the cases to process.'
     CsvInputLayout.addRow(self.batchTableSelector)
 
-    self.batchTableView = slicer.qMRMLTableView()
-    CsvInputLayout.addRow(self.batchTableView)
-    self.batchTableView.show()
-
     #
     # Parameters Area
     #
     self.parametersCollapsibleButton = ctk.ctkCollapsibleButton()
-    self.parametersCollapsibleButton.text = 'Parameters'
+    self.parametersCollapsibleButton.text = 'Table view and attribute properties'
     CsvInputLayout.addWidget(self.parametersCollapsibleButton)
 
     # Layout within the dummy collapsible button
     parametersFormLayout = qt.QFormLayout(self.parametersCollapsibleButton)
 
+    self.batchTableView = slicer.qMRMLTableView()
+    parametersFormLayout.addRow(self.batchTableView)
+    self.batchTableView.show()
+
     #
     # Input parameters GroupBox
     #
-
     self.inputParametersGroupBox = qt.QGroupBox('Input parameters')
     parametersFormLayout.addRow(self.inputParametersGroupBox)
 
@@ -91,28 +78,20 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     inputParametersFormLayout.addRow('Image Column', self.imageSelector)
 
     #
-    # Mask Path
+    # GroundTruth masks
     #
-    self.maskSelector = qt.QLineEdit()
-    self.maskSelector.text = 'mask'
-    self.maskSelector.toolTip = 'Name of the column specifying main mask files in input CSV'
-    inputParametersFormLayout.addRow('Mask Column', self.maskSelector)
+    self.inputGTMaskColumnNames = qt.QLineEdit()
+    self.inputGTMaskColumnNames.text = 'gt_0,gt_1,gt_2'
+    self.inputGTMaskColumnNames.toolTip = 'Comma separated names of the columns specifying groundtruth mask files in input CSV'
+    inputParametersFormLayout.addRow('Groundtruth masks Column(s)', self.inputGTMaskColumnNames)
 
     #
-    # Additional images
+    # Predicted masks
     #
-    self.addImsSelector = qt.QLineEdit()
-    self.addImsSelector.text = ''
-    self.addImsSelector.toolTip = 'Comma separated names of the columns specifying additional image files in input CSV'
-    inputParametersFormLayout.addRow('Additional images Column(s)', self.addImsSelector)
-
-    #
-    # Additional masks
-    #
-    self.addMasksSelector = qt.QLineEdit()
-    self.addMasksSelector.text = ''
-    self.addMasksSelector.toolTip = 'Comma separated names of the columns specifying additional mask files in input CSV'
-    inputParametersFormLayout.addRow('Additional masks Column(s)', self.addMasksSelector)
+    self.inputPredMaskColumnNames = qt.QLineEdit()
+    self.inputPredMaskColumnNames.text = 'pred_0,pred_1,pred_2'
+    self.inputPredMaskColumnNames.toolTip = 'Comma separated names of the columns specifying predicted mask files in input CSV'
+    inputParametersFormLayout.addRow('Predicted masks Column(s)', self.inputPredMaskColumnNames)
 
     #
     # Connect Event Handlers
@@ -120,36 +99,11 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.batchTableSelector.connect('nodeActivated(vtkMRMLNode*)', self.onChangeTable)
     self.imageSelector.connect('textEdited(QString)', self.onChangeImageColumn)
 
-    self.segmentationParametersGroupBox = qt.QGroupBox('Mask interaction parameters')
-    parametersFormLayout.addRow(self.segmentationParametersGroupBox)
-
-    segmentationParametersFormLayout = qt.QFormLayout(self.segmentationParametersGroupBox)
-
-    #
-    # Auto-redirect to SegmentEditor
-    #
-    self.chkAutoRedirect = qt.QCheckBox()
-    self.chkAutoRedirect.checked = False
-    self.chkAutoRedirect.toolTip = 'Automatically switch module to "SegmentEditor" when each case is loaded'
-    segmentationParametersFormLayout.addRow('Go to Segment Editor', self.chkAutoRedirect)
-
-    #
-    # Save masks
-    #
-    self.chkSaveMasks = qt.QCheckBox()
-    self.chkSaveMasks.checked = False
-    self.chkSaveMasks.toolTip = 'save all initially loaded masks when proceeding to next case'
-    segmentationParametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
-
-    #
-    # Save new masks
-    #
-    self.chkSaveNewMasks = qt.QCheckBox()
-    self.chkSaveNewMasks.checked = True
-    self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
-    segmentationParametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
-
     return self.CsvInputGroupBox
+
+  def _onDisplayQuantificationTable(self):
+    slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveTableID(self.logic.table.GetID())
+    slicer.app.applicationLogic().PropagateTableSelection()
 
   # ------------------------------------------------------------------------------
   def enter(self):
@@ -175,12 +129,9 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 
     columnMap = self._parseConfig()
 
-    self._iterator = CaseTableIteratorLogic(self.tableNode, columnMap)
+    self._iterator = CsvInferenceIteratorLogic(self.tableNode, columnMap)
     self._iterator.registerEventListener(
-      CsvTableEventHandler(reader=reader,
-                           redirect=self.chkAutoRedirect.checked,
-                           saveNew=self.chkSaveNewMasks.checked,
-                           saveLoaded=self.chkSaveMasks.checked)
+      CsvTableEventHandler(reader=reader)
     )
     return self._iterator
 
@@ -215,14 +166,11 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     assert self.imageSelector.text != ''  # Image column is a required column
     columnMap['image'] = str(self.imageSelector.text).strip()
 
-    if self.maskSelector.text != '':
-      columnMap['mask'] = str(self.maskSelector.text).strip()
+    if self.inputGTMaskColumnNames.text != '':
+      columnMap['gtMasks'] = [str(c).strip() for c in self.inputGTMaskColumnNames.text.split(',')]
 
-    if self.addImsSelector.text != '':
-      columnMap['additionalImages'] = [str(c).strip() for c in self.addImsSelector.text.split(',')]
-
-    if self.addMasksSelector.text != '':
-      columnMap['additionalMasks'] = [str(c).strip() for c in self.addMasksSelector.text.split(',')]
+    if self.inputPredMaskColumnNames.text != '':
+      columnMap['predMasks'] = [str(c).strip() for c in self.inputPredMaskColumnNames.text.split(',')]
 
     return columnMap
 
@@ -232,10 +180,29 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 # ------------------------------------------------------------------------------
 
 
-class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
+class CsvInferenceIteratorLogic(IteratorBase.IteratorLogicBase):
+
+  @property
+  def table(self):
+    if not hasattr(self, '_table') or self._table is None:
+      self._table = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLTableNode')
+      self._table.SetUseColumnNameAsColumnHeader(True)
+    return self._table
+
+  @table.setter
+  def table(self, table):
+    assert(any(type(table) is t for t in [slicer.vtkMRMLTableNode, type(None)]))
+    self._table = table
+
+  @staticmethod
+  def getAllSegmentIDs(segmentationNode):
+    segmentIDs = vtk.vtkStringArray()
+    segmentation = segmentationNode.GetSegmentation()
+    segmentation.GetSegmentIDs(segmentIDs)
+    return [segmentIDs.GetValue(idx) for idx in range(segmentIDs.GetNumberOfValues())]
 
   def __init__(self, tableNode, columnMap):
-    super(CaseTableIteratorLogic, self).__init__()
+    super(CsvInferenceIteratorLogic, self).__init__()
     assert tableNode is not None, 'No table selected! Cannot instantiate batch'
 
     # If the table was loaded from a file, get the directory containing the file as reference for relative paths
@@ -248,15 +215,14 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     # Get the actual table contained in the MRML node
     self.batchTable = tableNode.GetTable()
 
-    # Dictionary holding the specified (and found) columns from the tableNode
     self.caseColumns = self._getColumns(columnMap)
 
     self.caseCount = self.batchTable.GetNumberOfRows()  # Counter equalling the total number of cases
 
   # ------------------------------------------------------------------------------
   def __del__(self):
-    super(CaseTableIteratorLogic, self).__del__()
-    self.logger.debug('Destroying CSV Table Iterator')
+    super(CsvInferenceIteratorLogic, self).__del__()
+    self.logger.debug('Destroying CSV inference Iterator')
     self.batchTable = None
     self.caseColumns = None
 
@@ -291,9 +257,8 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     # Get the other configurable columns
     getColumn('root')
     getColumn('image')
-    getColumn('mask')
-    getListColumn('additionalImages')
-    getListColumn('additionalMasks')
+    getListColumn('gtMasks')
+    getListColumn('predMasks')
 
     return caseColumns
 
@@ -317,30 +282,24 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     im_node = self._loadImageNode(root, im)
     assert im_node is not None, 'Failed to load main image'
 
-    additionalImageNodes = []
-    for im in self._getColumnValue('additionalImages', case_idx, True):
-      add_im_node = self._loadImageNode(root, im)
-      if add_im_node is not None:
-        additionalImageNodes.append(add_im_node)
+    # TODO: load all gt masks into same segmentation node
+    gtMaskNodes = []
+    for ma in self._getColumnValue('gtMasks', case_idx, True):
+      gt_ma_node = self._loadMaskNode(root, ma, ref_im=im_node)
+      if gt_ma_node is not None:
+        gtMaskNodes.append(gt_ma_node)
 
-    # Load masks
-    ma = self._getColumnValue('mask', case_idx)
-    if ma is not None:
-      ma_node = self._loadMaskNode(root, ma, im_node)
-    else:
-      ma_node = None
-
-    additionalMaskNodes = []
-    for ma in self._getColumnValue('additionalMasks', case_idx, True):
-      add_ma_node = self._loadMaskNode(root, ma)
-      if add_ma_node is not None:
-        additionalMaskNodes.append(add_ma_node)
+    # TODO: load all pred masks into same segmentation node
+    predMaskNodes = []
+    for ma in self._getColumnValue('predMasks', case_idx, True):
+      pred_ma_node = self._loadMaskNode(root, ma, ref_im=im_node, color=(1., 0.07, 0.03))
+      if pred_ma_node is not None:
+        predMaskNodes.append(pred_ma_node)
 
     self.parameterNode.SetParameter("CaseData", {
       "InputImage_ID": im_node.GetID(),
-      "InputMask_ID": ma_node.GetID(),
-      "Additional_InputImage_IDs": [node.GetID() for node in additionalImageNodes],
-      "Additional_InputMask_IDs": [node.GetID() for node in additionalMaskNodes],
+      "GT_Mask_IDs": [node.GetID() for node in gtMaskNodes],
+      "PRED_Mask_IDs": [node.GetID() for node in predMaskNodes],
     }.__str__())
 
     self.currentIdx = case_idx
@@ -353,10 +312,11 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     caseData = eval(self.parameterNode.GetParameter("CaseData"))
 
     self.removeNodeByID(caseData["InputImage_ID"])
-    self.removeNodeByID(caseData["InputMask_ID"])
-    map(self.removeNodeByID, caseData["Additional_InputImage_IDs"])
-    map(self.removeNodeByID, caseData["Additional_InputMask_IDs"])
+    map(self.removeNodeByID, caseData["GT_Mask_IDs"])
+    map(self.removeNodeByID, caseData["PRED_Mask_IDs"])
     self.currentIdx = None
+    slicer.mrmlScene.RemoveNode(self.table)
+    self.table = None
 
   def getCaseData(self):
     """
@@ -364,13 +324,12 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     """
     if self.parameterNode:
       caseData = eval(self.parameterNode.GetParameter("CaseData"))
-      im = slicer.mrmlScene.GetNodeByID(caseData["InputImage_ID"])
-      ma = slicer.mrmlScene.GetNodeByID(caseData["InputMask_ID"])
-      add_im = list(map(slicer.mrmlScene.GetNodeByID, caseData["Additional_InputImage_IDs"]))
-      add_ma = list(map(slicer.mrmlScene.GetNodeByID, caseData["Additional_InputMask_IDs"]))
-      return im, ma, add_im, add_ma
+      im_node = slicer.mrmlScene.GetNodeByID(caseData["InputImage_ID"])
+      gt_mask_nodes = list(map(slicer.mrmlScene.GetNodeByID, caseData["GT_Mask_IDs"]))
+      pred_mask_nodes = list(map(slicer.mrmlScene.GetNodeByID, caseData["PRED_Mask_IDs"]))
+      return im_node, gt_mask_nodes, pred_mask_nodes
     else:
-      return [None] * 4
+      return [None] * 3
 
   # ------------------------------------------------------------------------------
   def _getColumnValue(self, colName, idx, is_list=False):
@@ -425,7 +384,7 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     return im_node
 
   # ------------------------------------------------------------------------------
-  def _loadMaskNode(self, root, fname, ref_im=None):
+  def _loadMaskNode(self, root, fname, ref_im=None, color=None):
     ma_path = self._buildPath(root, fname)
     if ma_path is None:
       return None
@@ -437,33 +396,11 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
     # Determine if file is segmentation based on extension
     isSegmentation = os.path.splitext(ma_path)[0].endswith('.seg')
-    # Try to load the mask
     if isSegmentation:
       self.logger.debug('Loading segmentation')
       load_success, ma_node = slicer.util.loadSegmentation(ma_path, returnNode=True)
     else:
-      self.logger.debug('Loading labelmap and converting to segmentation')
-      # If not segmentation, then load as labelmap then convert to segmentation
-      load_success, ma_node = slicer.util.loadLabelVolume(ma_path, returnNode=True)
-      if load_success:
-        # Only try to make a segmentation node if Slicer was able to load the label map
-        seg_node = slicer.vtkMRMLSegmentationNode()
-        slicer.mrmlScene.AddNode(seg_node)
-        seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_im)
-        load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node)
-        slicer.mrmlScene.RemoveNode(ma_node)
-        ma_node = seg_node
-
-        # Add a storage node for this segmentation node
-        file_base, ext = os.path.splitext(ma_path)
-        store_node = seg_node.CreateDefaultStorageNode()
-        slicer.mrmlScene.AddNode(store_node)
-        seg_node.SetAndObserveStorageNodeID(store_node.GetID())
-
-        store_node.SetFileName('%s.seg%s' % (file_base, ext))
-
-        # UnRegister the storage node to prevent a memory leak
-        store_node.UnRegister(None)
+      load_success, ma_node = self.loadLabelIntoSegmentation(ma_path, ref_im, color)
 
     if not load_success:
       self.logger.warning('Failed to load ' + ma_path)
@@ -475,109 +412,133 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
       # split off .seg
       file_base = os.path.splitext(file_base)[0]
     ma_node.SetName(file_base)
-
     return ma_node
+
+  def loadLabelIntoSegmentation(self, ma_path, ref_im, color=None):
+    # TODO: allow seg_node parameter to prevent creation of new node for every segment
+    self.logger.debug('Loading labelmap and converting to segmentation')
+
+    load_success, ma_node = slicer.util.loadLabelVolume(ma_path, returnNode=True)
+    if load_success:
+      seg_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationNode')
+      seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_im)
+      load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node)
+      segment = seg_node.GetSegmentation().GetSegment(self.getAllSegmentIDs(seg_node)[-1])
+      if segment and color:
+        segment.SetColor(*color)
+      slicer.mrmlScene.RemoveNode(ma_node)
+      ma_node = seg_node
+    return load_success, ma_node
 
 
 class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
 
-  def __init__(self, redirect, reader=None, saveNew=False, saveLoaded=False):
-    super(CsvTableEventHandler, self).__init__()
-
-    # Some variables that control the output (formatting and control of discarding/saving
-    self.redirect = redirect
-    self.reader = reader
-    self.saveNew = saveNew
-    self.saveLoaded = saveLoaded
+  COMPARISON_NAMES_GETTERS = OrderedDict({"Hausdorff_Maximum_mm": "GetMaximumHausdorffDistanceForVolumeMm",
+                                          "Hausdorff_Average_mm": "GetAverageHausdorffDistanceForBoundaryMm",
+                                          "Hausdorff_95_mm": "GetPercent95HausdorffDistanceForBoundaryMm",
+                                          "Dice_coefficient": "GetDiceCoefficient",
+                                          "Dice_Reference_volume_cc": "GetReferenceVolumeCc",
+                                          "Dice_Compare_volume_cc": "GetCompareVolumeCc"})
 
   @staticmethod
-  def _rotateToVolumePlanes(referenceVolume):
-    sliceNodes = slicer.util.getNodes('vtkMRMLSliceNode*')
-    for name, node in sliceNodes.items():
-      node.RotateToVolumePlane(referenceVolume)
-    # Snap to IJK to try and avoid rounding errors
-    sliceLogics = slicer.app.layoutManager().mrmlSliceLogics()
-    numLogics = sliceLogics.GetNumberOfItems()
-    for n in range(numLogics):
-      l = sliceLogics.GetItemAsObject(n)
-      l.SnapSliceOffsetToIJK()
+  def showSegmentation(segmentationNode):
+    segmentationNode.CreateClosedSurfaceRepresentation()
+    displayNode = segmentationNode.GetDisplayNode()
+    displayNode.SetAllSegmentsVisibility3D(True)
+    displayNode.SetAllSegmentsOpacity3D(0.5)
+    displayNode.SetAllSegmentsVisibility(True)
+
+  @staticmethod
+  def hideAllSegmentations():
+    seg_nodes = slicer.util.getNodesByClass("vtkMRMLSegmentationNode")
+    for seg_node in seg_nodes:
+      displayNode = seg_node.GetDisplayNode()
+      displayNode.SetAllSegmentsVisibility(False)
+
+  def __init__(self, reader=None):
+    super(CsvTableEventHandler, self).__init__()
+
+    self.reader = reader
+    self._onQuantificationRowChanged = None
 
   def onCaseLoaded(self, caller, *args, **kwargs):
+    self.initializeTableHeader(caller)
+
     try:
-      im, ma, add_im, add_ma = caller.getCaseData()
+      im, gt_ma, pred_ma = caller.getCaseData()
 
       # Set the slice viewers to the correct volumes
       for sliceWidgetName in ['Red', 'Green', 'Yellow']:
         logic = slicer.app.layoutManager().sliceWidget(sliceWidgetName).sliceLogic().GetSliceCompositeNode()
         logic.SetBackgroundVolumeID(im.GetID())
-        if len(add_im) > 0:
-          logic.SetForegroundVolumeID(add_im[0].GetID())
 
-      # Snap the viewers to the slice plane of the main image
-      self._rotateToVolumePlanes(im)
+      self.createSegmentsComparison(gt_ma, pred_ma, caller.table)
 
-      # the following code should go somewhere in a separate class including the save part
-      if self.redirect:
-        if slicer.util.selectedModule() != 'SegmentEditor':
-          slicer.util.selectModule('SegmentEditor')
-        else:
-          slicer.modules.SegmentEditorWidget.enter()
-
-        # Explicitly set the segmentation and master volume nodes
-        segmentEditorWidget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
-        if ma is not None:
-          segmentEditorWidget.setSegmentationNode(ma)
-        segmentEditorWidget.setMasterVolumeNode(im)
-
+      self.setupFourUpTableViewConnection(caller)
     except Exception as e:
       self.logger.warning("Error loading new case: %s", e.message)
       self.logger.debug('', exc_info=True)
 
+  def initializeTableHeader(self, caller):
+    for colName in ["Segments"] + list(self.COMPARISON_NAMES_GETTERS.keys()):
+      col = caller.table.AddColumn()
+      col.SetName(colName)
+
+  def setupFourUpTableViewConnection(self, caller):
+    if not slicer.app.layoutManager().tableWidget(0):
+      slicer.app.layoutManager().setLayout(slicer.vtkMRMLLayoutNode.SlicerLayoutFourUpTableView)
+
+    slicer.app.applicationLogic().GetSelectionNode().SetReferenceActiveTableID(caller.table.GetID())
+    slicer.app.applicationLogic().PropagateTableSelection()
+
+    self.fourUpTableView = slicer.app.layoutManager().tableWidget(0).tableView()
+    self.fourUpTableView.setSelectionBehavior(qt.QTableView.SelectRows)
+
+    def onQuantificationRowChanged(caller, itemSelection=None):
+      selectionModel = self.fourUpTableView.selectionModel()
+      selectedRows = [selectionModel.selectedRows()[idx].row() for idx in range(len(selectionModel.selectedRows()))]
+      self.hideAllSegmentations()
+      if selectedRows:
+        _, gt_masks, pred_masks = caller.getCaseData()
+        zipped = zip(gt_masks, pred_masks)
+
+        for selectedRow in selectedRows:
+          gt_mask, pred_mask = zipped[selectedRow]
+          self.showSegmentation(gt_mask)
+          self.showSegmentation(pred_mask)
+
+    self._onQuantificationRowChanged = lambda sel: onQuantificationRowChanged(caller, sel)
+
+    self.fourUpTableView.selectionModel().selectionChanged.connect(self._onQuantificationRowChanged)
+    self.fourUpTableView.selectAll()
+    onQuantificationRowChanged(caller)
+
+  def createSegmentsComparison(self, gt_ma, pred_ma, table):
+    for rowIdx, (gt_seg, pred_seg) in enumerate(zip(gt_ma, pred_ma)):
+      # NB: assuming that every imported mask has only one segment
+      gt_seg_id = CsvInferenceIteratorLogic.getAllSegmentIDs(gt_seg)[-1]
+      pred_seg_id = CsvInferenceIteratorLogic.getAllSegmentIDs(pred_seg)[-1]
+      segmentComparisonNode = self._compareSegments(gt_seg, pred_seg, gt_seg_id, pred_seg_id)
+
+      rowIdx = table.AddEmptyRow()
+      table.SetCellText(rowIdx, 0, "{}/{}".format(gt_seg.GetName(), pred_seg.GetName()))
+
+      if segmentComparisonNode:
+        for colIdx, getter in enumerate(self.COMPARISON_NAMES_GETTERS.values(), start=1):
+          table.SetCellText(rowIdx, colIdx, str(getattr(segmentComparisonNode, getter)()))
+      slicer.mrmlScene.RemoveNode(segmentComparisonNode)
+
+  def _compareSegments(self, gt_seg_node, pred_seg_node, gt_seg_id, pred_seg_id):
+    segmentComparisonNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentComparisonNode', 'Inference')
+    segmentComparisonNode.SetAndObserveReferenceSegmentationNode(gt_seg_node)
+    segmentComparisonNode.SetReferenceSegmentID(gt_seg_id)
+    segmentComparisonNode.SetAndObserveCompareSegmentationNode(pred_seg_node)
+    segmentComparisonNode.SetCompareSegmentID(pred_seg_id)
+    segmentComparisonLogic = slicer.modules.segmentcomparison.logic()
+    segmentComparisonLogic.ComputeHausdorffDistances(segmentComparisonNode)
+    segmentComparisonLogic.ComputeDiceStatistics(segmentComparisonNode)
+    return segmentComparisonNode
+
   def onCaseAboutToClose(self, caller, *args, **kwargs):
-    caseData = caller.getCaseData()
-    _, mask, _, additionalMasks = caseData
-    if self.saveLoaded:
-      if mask is not None:
-        self.saveMask(mask, self.reader, caseData)
-      for ma in additionalMasks:
-        self.saveMask(ma, self.reader, caseData)
-    if self.saveNew:
-      # TODO: this should depend on if more segments were added in segmentation node not depending on a new
-      nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode')
-               if n not in additionalMasks and n != mask]
-
-      map(lambda n: self.saveMask(n, self.reader, caseData), nodes)
-
-    if slicer.util.selectedModule() == 'SegmentEditor':
-      slicer.modules.SegmentEditorWidget.exit()
-
-  # ------------------------------------------------------------------------------
-  def saveMask(self, node, reader, caseData, overwrite_existing=False):
-    storage_node = node.GetStorageNode()
-    if storage_node is not None and storage_node.GetFileName() is not None:
-      # mask was loaded, save the updated mask in the same directory
-      target_dir = os.path.dirname(storage_node.GetFileName())
-    else:
-      im_node, _, _, _ = caseData
-      target_dir = os.path.dirname(im_node.GetStorageNode().GetFileName())
-
-    nodename = node.GetName()
-
-    if reader is not None:
-      nodename += '_' + reader
-    filename = os.path.join(target_dir, nodename)
-
-    # Prevent overwriting existing files
-    if os.path.exists(filename + '.seg.nrrd') and not overwrite_existing:
-      self.logger.debug('Filename exists! Generating unique name...')
-      idx = 1
-      filename += '(%d).seg.nrrd'
-      while os.path.exists(filename % idx):
-        idx += 1
-      filename = filename % idx
-    else:
-      filename += '.seg.nrrd'
-
-    # Save the node
-    slicer.util.saveNode(node, filename)
-    self.logger.info('Saved node %s in %s', nodename, filename)
+    if self._onQuantificationRowChanged is not None:
+      self.fourUpTableView.selectionModel().selectionChanged.disconnect(self._onQuantificationRowChanged)
