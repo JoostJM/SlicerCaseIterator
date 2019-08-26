@@ -116,6 +116,13 @@ class IteratorLogicBase(object):
   - saveMask: Function to store a loaded or new mask.
   """
 
+  @property
+  def parameterNode(self):
+    node = self._findParameterNodeInScene()
+    if not node:
+      node = self._createParameterNode()
+    return node
+
   @staticmethod
   def removeNodeByID(nodeID, mrmlScene=slicer.mrmlScene):
     node = mrmlScene.GetNodeByID(nodeID)
@@ -124,10 +131,8 @@ class IteratorLogicBase(object):
 
   def __init__(self):
     self.logger = logging.getLogger('SlicerCaseIterator.Iterator')
-    self.parameterNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
     self.currentIdx = None
     self.caseCount = None
-
     self._eventListeners = IteratorEventListenerList(self)
 
   def __del__(self):
@@ -135,6 +140,20 @@ class IteratorLogicBase(object):
     if self.currentIdx is not None:
       self.closeCase()
     self._eventListeners = []
+    slicer.mrmlScene.RemoveNode(self.parameterNode)
+
+  def _findParameterNodeInScene(self):
+    for i in range(slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLScriptedModuleNode")):
+      n = slicer.mrmlScene.GetNthNodeByClass(i, "vtkMRMLScriptedModuleNode")
+      if n.GetModuleName() == "SlicerCaseIterator":
+        return n
+    return None
+
+  def _createParameterNode(self):
+    node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
+    node.SetSingletonTag("SlicerCaseIterator")
+    node.SetModuleName("SlicerCaseIterator")
+    return node
 
   def registerEventListener(self, listener):
     """ Registering a listener that can act upon event invocation. Implementations of IteratorLogicBase have to
