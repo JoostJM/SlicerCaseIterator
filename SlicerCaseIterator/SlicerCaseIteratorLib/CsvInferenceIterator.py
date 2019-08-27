@@ -110,7 +110,7 @@ class CsvInferenceIteratorWidget(IteratorBase.IteratorWidgetBase):
     # Preload Cases
     #
     self.preloadCases = qt.QCheckBox()
-    self.preloadCases.checked = True
+    self.preloadCases.checked = False
     self.preloadCases.toolTip = 'Preloading all cases'
     iterationParametersFormLayout.addRow('Preload cases', self.preloadCases)
 
@@ -236,7 +236,7 @@ class CsvInferenceIteratorLogic(IteratorBase.IteratorLogicBase):
   @property
   def table(self):
     if self.cacheCases:
-      self.getCachedTable(self.currentIdx)
+      self._table = self.getCachedTable(self.currentIdx)
 
     if not hasattr(self, '_table') or self._table is None:
       self._table = self._createTable()
@@ -288,22 +288,19 @@ class CsvInferenceIteratorLogic(IteratorBase.IteratorLogicBase):
   def reset(self):
     if self.cacheCases:
       for caseIdx in range(self.caseCount):
-        self.cacheCases = False
-        self.currentIdx = caseIdx
-        self.closeCase()
-        # caseData = self.getCaseData(caseIdx)
-        # if caseData:
-        #   im, gt_ma, pred_ma = caseData
-        #   slicer.mrmlScene.RemoveNode(im)
-        #   map(slicer.mrmlScene.RemoveNode, gt_ma)
-        #   map(slicer.mrmlScene.RemoveNode, pred_ma)
-        #   self.parameterNode.UnsetParameter("CaseData_{}".format(caseIdx))
-        #   if caseIdx in list(self._tablesCache.keys()):
-        #     slicer.mrmlScene.RemoveNode(self._tablesCache[caseIdx])
-        #     del self._tablesCache[caseIdx]
-        # else:
-        #   import logging
-        #   logging.info("Cannot find case data for {}".format(caseIdx))
+        caseData = self.getCaseData(caseIdx)
+        if caseData:
+          self.logger.info("Deleting casedata for {}".format(caseIdx))
+          im, gt_ma, pred_ma = caseData
+          slicer.mrmlScene.RemoveNode(im)
+          map(slicer.mrmlScene.RemoveNode, gt_ma)
+          map(slicer.mrmlScene.RemoveNode, pred_ma)
+          self.parameterNode.UnsetParameter("CaseData_{}".format(caseIdx))
+          if caseIdx in list(self._tablesCache.keys()):
+            slicer.mrmlScene.RemoveNode(self._tablesCache[caseIdx])
+            del self._tablesCache[caseIdx]
+        else:
+          self.logger.info("Cannot find case data for {}".format(caseIdx))
     else:
       self.closeCase()
 
@@ -395,21 +392,23 @@ class CsvInferenceIteratorLogic(IteratorBase.IteratorLogicBase):
     if caseData:
       im, gt_ma, pred_ma = caseData
 
-    if not self.cacheCases:
-      slicer.mrmlScene.RemoveNode(im)
-      map(slicer.mrmlScene.RemoveNode, gt_ma)
-      map(slicer.mrmlScene.RemoveNode, pred_ma)
-      self.parameterNode.UnsetParameter("CaseData_{}".format(self.currentIdx))
-      slicer.mrmlScene.RemoveNode(self.table)
-      self.currentIdx = None
-      self._table = None
+      if not self.cacheCases:
+        slicer.mrmlScene.RemoveNode(im)
+        map(slicer.mrmlScene.RemoveNode, gt_ma)
+        map(slicer.mrmlScene.RemoveNode, pred_ma)
+        self.parameterNode.UnsetParameter("CaseData_{}".format(self.currentIdx))
+        if self._table:
+          slicer.mrmlScene.RemoveNode(self._table)
+        self.currentIdx = None
+        self._table = None
 
   def getCaseData(self, caseIdx=None):
     """
     :return: image node, mask node, additional image nodes, additional mask nodes
     """
-    caseIdx = caseIdx if caseIdx else self.currentIdx
+    caseIdx = caseIdx if caseIdx is not None else self.currentIdx
     caseData = self.parameterNode.GetParameter("CaseData_{}".format(caseIdx))
+    self.logger.info("Setting CaseData_{}".format(caseIdx))
     if caseData:
       caseData = eval(caseData)
       im_node = slicer.mrmlScene.GetNodeByID(caseData["InputImage_ID"])
@@ -417,6 +416,7 @@ class CsvInferenceIteratorLogic(IteratorBase.IteratorLogicBase):
       pred_mask_nodes = list(map(slicer.mrmlScene.GetNodeByID, caseData["PRED_Mask_IDs"]))
       return im_node, gt_mask_nodes, pred_mask_nodes
     else:
+      self.logger.info("CaseData_{} is empty".format(caseIdx))
       return None
 
   # ------------------------------------------------------------------------------
@@ -546,6 +546,18 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
       displayNode = seg_node.GetDisplayNode()
       displayNode.SetAllSegmentsVisibility(False)
 
+  @staticmethod
+  def _rotateToVolumePlanes(referenceVolume):
+    sliceNodes = slicer.util.getNodes('vtkMRMLSliceNode*')
+    for name, node in sliceNodes.items():
+      node.RotateToVolumePlane(referenceVolume)
+    # Snap to IJK to try and avoid rounding errors
+    sliceLogics = slicer.app.layoutManager().mrmlSliceLogics()
+    numLogics = sliceLogics.GetNumberOfItems()
+    for n in range(numLogics):
+      l = sliceLogics.GetItemAsObject(n)
+      l.FitSliceToAll()
+
   def __init__(self, reader=None):
     super(CsvTableEventHandler, self).__init__()
 
@@ -560,6 +572,8 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
       for sliceWidgetName in ['Red', 'Green', 'Yellow']:
         logic = slicer.app.layoutManager().sliceWidget(sliceWidgetName).sliceLogic().GetSliceCompositeNode()
         logic.SetBackgroundVolumeID(im.GetID())
+
+      self._rotateToVolumePlanes(im)
 
       if caller.table.GetNumberOfRows() == 0:
         self.initializeTableHeader(caller)
