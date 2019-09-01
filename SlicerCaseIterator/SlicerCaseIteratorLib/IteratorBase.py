@@ -31,6 +31,7 @@ class IteratorWidgetBase(object):
   def __init__(self):
     self.logger = logging.getLogger('SlicerCaseIterator.IteratorWidget')
     self.validationHandler = None
+    self.layout = None
 
   def __del__(self):
     self.logger.debug('Destroying Iterator Widget')
@@ -39,7 +40,8 @@ class IteratorWidgetBase(object):
   @abstractmethod
   def setup(self):
     """
-    This function should return a qt.QGroupbox containing all the GUI elements needed to configure the iterator
+    This function should return a qt.QGroupbox containing all the GUI elements needed to configure the iterator.
+    Moreover, this groupbox should also be assigned to `self.layout`, which is used to control visibility in the GUI.
     :return: qt.QGroupbox
     """
 
@@ -73,14 +75,13 @@ class IteratorWidgetBase(object):
     :return: Instance of class, derived from IteratorBase
     """
 
-  @abstractmethod
   def cleanupBatch(self):
     """
     Function to cleanup after finishing or resetting a batch. Main objective is to remove non-needed references to
     tracked nodes in the widgeet, thereby allowing their associated resources to be released and GC'ed.
     :return: None
     """
-
+    pass
 
 # ------------------------------------------------------------------------------
 # IteratorLogicBase
