@@ -13,7 +13,8 @@
 
 import logging
 
-import vtk, qt, ctk, slicer
+import vtk as vtk
+import qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
 from SlicerCaseIteratorLib import IteratorBase, CsvTableIterator
@@ -127,7 +128,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Save masks
     #
     self.chkSaveMasks = qt.QCheckBox()
-    self.chkSaveMasks.checked = 0
+    self.chkSaveMasks.checked = 1
     self.chkSaveMasks.toolTip = 'save all initially loaded masks when proceeding to next case'
     parametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
 
@@ -386,40 +387,109 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       self.currentCase = self.iterator.loadCase(self.currentIdx)
       im, ma, add_im, add_ma = self.currentCase
 
+      ##Synchronize Slice Views
+
+      slicer.sliceNodes = [slicer.app.layoutManager().sliceWidget(viewName).mrmlSliceNode() for viewName in slicer.app.layoutManager().sliceViewNames()]
+      slicer.updatingSliceNodes = False
+
+      for sliceNode in slicer.sliceNodes:
+        sliceNode.AddObserver(vtk.vtkCommand.ModifiedEvent, self.sliceModified)
+
+
+      #Change Window Level
+      artVolume = im
+      venVolume = add_im[1]
+      ncVolume = add_im[0]
+      
+      artDisplay = artVolume.GetDisplayNode()
+      venDisplay = venVolume.GetDisplayNode()
+      ncDisplay = ncVolume.GetDisplayNode()
+
+      for displayNode in [artDisplay,venDisplay,ncDisplay]:
+        displayNode.AutoWindowLevelOff()
+        displayNode.SetWindow(350)
+        displayNode.SetLevel(40)
+
       # Set the slice viewers to the correct volumes
       red_logic = slicer.app.layoutManager().sliceWidget('Red').sliceLogic().GetSliceCompositeNode()
       green_logic = slicer.app.layoutManager().sliceWidget('Green').sliceLogic().GetSliceCompositeNode()
       yellow_logic = slicer.app.layoutManager().sliceWidget('Yellow').sliceLogic().GetSliceCompositeNode()
+      slice4_logic = slicer.app.layoutManager().sliceWidget('Slice4').sliceLogic().GetSliceCompositeNode()
 
       red_logic.SetBackgroundVolumeID(im.GetID())
       green_logic.SetBackgroundVolumeID(im.GetID())
-      yellow_logic.SetBackgroundVolumeID(im.GetID())
+      yellow_logic.SetBackgroundVolumeID(add_im[0].GetID())
+      slice4_logic.SetBackgroundVolumeID(add_im[1].GetID())
+      
+      red_logic.SetForegroundVolumeID(add_im[0].GetID())
+      green_logic.SetForegroundVolumeID(add_im[0].GetID())
+      yellow_logic.SetForegroundVolumeID(im.GetID())
+      slice4_logic.SetForegroundVolumeID(add_im[0].GetID())
 
-      if len(add_im) > 0:
-        red_logic.SetForegroundVolumeID(add_im[0].GetID())
-        green_logic.SetForegroundVolumeID(add_im[0].GetID())
-        yellow_logic.SetForegroundVolumeID(add_im[0].GetID())
+      sliceNodes = slicer.util.getNodesByClass('vtkMRMLSliceNode')
+      sliceNodes[1].SetOrientation("Axial")
 
       # Snap the viewers to the slice plane of the main image
       self._rotateToVolumePlanes(im)
 
+      ### Change redirection to Markups Module
       if self.redirect:
-        if slicer.util.selectedModule() != 'SegmentEditor':
-          slicer.util.selectModule('SegmentEditor')
+        if slicer.util.selectedModule() != 'Markups':
+          slicer.util.selectModule('Markups')
         else:
           slicer.modules.SegmentEditorWidget.enter()
 
         # Explictly set the segmentation and master volume nodes
-        segmentEditorWidget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
-        if ma is not None:
-          segmentEditorWidget.setSegmentationNode(ma)
-        segmentEditorWidget.setMasterVolumeNode(im)
+        # segmentEditorWidget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
+        # if ma is not None:
+        #   segmentEditorWidget.setSegmentationNode(ma)
+        # segmentEditorWidget.setMasterVolumeNode(im)
 
     except Exception as e:
       self.logger.warning("Error loading new case: %s", e.message)
       self.logger.debug('', exc_info=True)
+    
+    ###Turn On Persistence Mode For Fiducials
+
+    selectionNode = slicer.mrmlScene.GetNodeByID("vtkMRMLSelectionNodeSingleton")
+    selectionNode.SetReferenceActivePlaceNodeClassName("vtkMRMLMarkupsFiducialNode")
+    interactionNode = slicer.mrmlScene.GetNodeByID("vtkMRMLInteractionNodeSingleton")
+    placeModePersistence = 1
+    interactionNode.SetPlaceModePersistence(placeModePersistence)
+
+    #interactionNode.SetCurrentInteractionMode(1)
+
+    ###placeModePersistence = 1
+    ###slicer.modules.markups.logic().StartPlaceMode(placeModePersistence)
+
+
+    # #Load background volume to each view
+    # layoutManager = slicer.app.layoutManager()
+    # sliceViews = layoutManager.sliceViewNames()
+    # for i,sliceViewName in enumerate(sorted(sliceViews)):
+    #   view = layoutManager.sliceWidget(sliceViewName).sliceView()
+    #   sliceNode = view.mrmlSliceNode()
+    #   sliceLogic = slicer.app.applicationLogic().GetSliceLogic(sliceNode)
+    #   compositeNode = sliceLogic.GetSliceCompositeNode()
+
+      
+    #   try:
+    #     print ("Loading Viewer "+str(compositeNode.GetSingletonTag())+" with Background Image "+str(self.volumesLoad[i].GetName()))
+    #     compositeNode.SetBackgroundVolumeID(self.volumesLoad[i].GetID())    
+    
     return False
 
+  def sliceModified(self,caller, event):
+      if slicer.updatingSliceNodes:
+        # prevent infinite loop of slice node updates triggering slice node updates
+          return
+      slicer.updatingSliceNodes = True
+      fov = caller.GetFieldOfView()
+      for sliceNode in slicer.sliceNodes:
+        if sliceNode != caller:
+            sliceNode.SetFieldOfView(*fov)
+      slicer.updatingSliceNodes = False
+  
   def _closeCase(self):
     _, mask, _, additionalMasks = self.currentCase
     if self.saveLoaded:
@@ -428,9 +498,10 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       for ma in additionalMasks:
         self.iterator.saveMask(ma, self.reader)
     if self.saveNew:
-      nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode')
+      nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLMarkupsFiducialNode')
                if n not in additionalMasks and n != mask]
       for n in nodes:
+        print (n)
         self.iterator.saveMask(n, self.reader)
 
     # Remove reference to current case, signalling it is closed

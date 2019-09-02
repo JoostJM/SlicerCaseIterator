@@ -86,7 +86,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     # Image Path
     #
     self.imageSelector = qt.QLineEdit()
-    self.imageSelector.text = 'image'
+    self.imageSelector.text = 'arterial'
     self.imageSelector.toolTip = 'Name of the column specifying main image files in input CSV'
     inputParametersFormLayout.addRow('Image Column', self.imageSelector)
 
@@ -94,15 +94,15 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     # Mask Path
     #
     self.maskSelector = qt.QLineEdit()
-    self.maskSelector.text = 'mask'
-    self.maskSelector.toolTip = 'Name of the column specifying main mask files in input CSV'
-    inputParametersFormLayout.addRow('Mask Column', self.maskSelector)
+    self.maskSelector.text = 'box'
+    self.maskSelector.toolTip = 'Name of the column specifying main box files in input CSV'
+    inputParametersFormLayout.addRow('Box Column', self.maskSelector)
 
     #
     # Additional images
     #
     self.addImsSelector = qt.QLineEdit()
-    self.addImsSelector.text = ''
+    self.addImsSelector.text = 'non-contrast,venous'
     self.addImsSelector.toolTip = 'Comma separated names of the columns specifying additional image files in input CSV'
     inputParametersFormLayout.addRow('Additional images Column', self.addImsSelector)
 
@@ -188,7 +188,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     columnMap['image'] = str(self.imageSelector.text).strip()
 
     if self.maskSelector.text != '':
-      columnMap['mask'] = str(self.maskSelector.text).strip()
+      columnMap['box'] = str(self.maskSelector.text).strip()
 
     if self.addImsSelector.text != '':
       columnMap['additionalImages'] = [str(c).strip() for c in self.addImsSelector.text.split(',')]
@@ -262,7 +262,7 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     # Get the other configurable columns
     getColumn('root')
     getColumn('image')
-    getColumn('mask')
+    getColumn('box')
     getListColumn('additionalImages')
     getListColumn('additionalMasks')
 
@@ -293,7 +293,7 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
         additionalImageNodes.append(add_im_node)
 
     # Load masks
-    ma = self._getColumnValue('mask', case_idx)
+    ma = self._getColumnValue('box', case_idx)
     if ma is not None:
       ma_node = self._loadMaskNode(root, ma, im_node)
     else:
@@ -362,59 +362,88 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
   # ------------------------------------------------------------------------------
   def _loadMaskNode(self, root, fname, ref_im=None):
     ma_path = self._buildPath(root, fname)
-    if ma_path is None:
-      return None
+    if ma_path == None:
+      fid = slicer.vtkMRMLMarkupsFiducialNode()
+      slicer.mrmlScene.AddNode(fid)
+      fid.SetName("BoxFiducials")
+
+      return fid
+
+    # if ma_path is None:
+    #   return None
 
     # Check if the file actually exists
-    if not os.path.isfile(ma_path):
-      self.logger.warning('Segmentation file %s does not exist, skipping...', fname)
-      return None
+    # if not os.path.isfile(ma_path):
+    #   self.logger.warning('Box file %s does not exist, skipping...', fname)
+    #   return None
 
     # Determine if file is segmentation based on extension
-    isSegmentation = os.path.splitext(ma_path)[0].endswith('.seg')
+    #isSegmentation = os.path.splitext(ma_path)[0].endswith('.seg')
+    isFiducials = os.path.splitext(ma_path)[0].endswith('.fcsv')    
+
     # Try to load the mask
-    if isSegmentation:
-      self.logger.debug('Loading segmentation')
-      load_success, ma_node = slicer.util.loadSegmentation(ma_path, returnNode=True)
+    if isFiducials:
+      self.logger.debug('Loading Fiducials')
+      load_success, fid = slicer.util.loadMarkupsFiducialList(ma_path,returnNode=True)
     else:
-      self.logger.debug('Loading labelmap and converting to segmentation')
-      # If not segmentation, then load as labelmap then convert to segmentation
-      load_success, ma_node = slicer.util.loadLabelVolume(ma_path, returnNode=True)
-      if load_success:
-        # Only try to make a segmentation node if Slicer was able to load the label map
-        seg_node = slicer.vtkMRMLSegmentationNode()
-        slicer.mrmlScene.AddNode(seg_node)
-        seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_im)
-        load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node)
-        slicer.mrmlScene.RemoveNode(ma_node)
-        ma_node = seg_node
+      fid = slicer.vtkMRMLMarkupsFiducialNode()
+      slicer.mrmlScene.AddNode(fid)
+      fid.SetName("BoxFiducials")
 
-        # Add a storage node for this segmentation node
-        file_base, ext = os.path.splitext(ma_path)
-        store_node = seg_node.CreateDefaultStorageNode()
-        slicer.mrmlScene.AddNode(store_node)
-        seg_node.SetAndObserveStorageNodeID(store_node.GetID())
 
-        store_node.SetFileName('%s.seg%s' % (file_base, ext))
+    # if isSegmentation:
+    #   self.logger.debug('Loading segmentation')
+    #   load_success, ma_node = slicer.util.loadSegmentation(ma_path, returnNode=True)
+    # else:
+    #   self.logger.debug('Loading labelmap and converting to segmentation')
+    #   # If not segmentation, then load as labelmap then convert to segmentation
+    #   load_success, ma_node = slicer.util.loadLabelVolume(ma_path, returnNode=True)
+    #   if load_success:
+    #     # Only try to make a segmentation node if Slicer was able to load the label map
+    #     seg_node = slicer.vtkMRMLSegmentationNode()
+    #     slicer.mrmlScene.AddNode(seg_node)
+    #     seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_im)
+    #     load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node)
+    #     slicer.mrmlScene.RemoveNode(ma_node)
+    #     ma_node = seg_node
 
-        # UnRegister the storage node to prevent a memory leak
-        store_node.UnRegister(None)
+    #     # Add a storage node for this segmentation node
+    #     file_base, ext = os.path.splitext(ma_path)
+    #     store_node = seg_node.CreateDefaultStorageNode()
+    #     slicer.mrmlScene.AddNode(store_node)
+    #     seg_node.SetAndObserveStorageNodeID(store_node.GetID())
+
+    #     store_node.SetFileName('%s.seg%s' % (file_base, ext))
+
+    #     # UnRegister the storage node to prevent a memory leak
+    #     store_node.UnRegister(None)
 
     if not load_success:
-      self.logger.warning('Failed to load ' + ma_path)
-      return None
+      self.logger.warning('Failed to load ' + ma_path + 
+      ' creating new fiducials node')
+      return fid
 
-    # Use the file basename as the name for the newly loaded segmentation node
-    file_base = os.path.splitext(os.path.basename(ma_path))[0]
-    if isSegmentation:
-      # split off .seg
-      file_base = os.path.splitext(file_base)[0]
-    ma_node.SetName(file_base)
+    # # Use the file basename as the name for the newly loaded segmentation node
+    # file_base = os.path.splitext(os.path.basename(ma_path))[0]
+    # if isSegmentation:
+    #   # split off .seg
+    #   file_base = os.path.splitext(file_base)[0]
+    # ma_node.SetName(file_base)
 
-    return ma_node
 
   # ------------------------------------------------------------------------------
   def saveMask(self, node, reader, overwrite_existing=False):
+
+    numberOfPoints = node.GetNumberOfFiducials()
+
+    self.logger.info("Saved Node has "+str(numberOfPoints)+" Points")
+
+    if numberOfPoints != 6:
+      self.logger.info("Need To Fix Fiducials So There Are Exactly 6 Points!!")
+
+      return
+
+
     storage_node = node.GetStorageNode()
     if storage_node is not None and storage_node.GetFileName() is not None:
       # mask was loaded, save the updated mask in the same directory
@@ -433,15 +462,15 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
     filename = os.path.join(target_dir, nodename)
 
     # Prevent overwriting existing files
-    if os.path.exists(filename + '.seg.nrrd') and not overwrite_existing:
+    if os.path.exists(filename + '.fcsv') and not overwrite_existing:
       self.logger.debug('Filename exists! Generating unique name...')
       idx = 1
-      filename += '(%d).seg.nrrd'
+      filename += '(%d).fcsv'
       while os.path.exists(filename % idx):
         idx += 1
       filename = filename % idx
     else:
-      filename += '.seg.nrrd'
+      filename += '.fcsv'
 
     # Save the node
     slicer.util.saveNode(node, filename)
