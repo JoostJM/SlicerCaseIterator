@@ -243,6 +243,10 @@ class CaseTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
     self.caseCount = self.batchTable.GetNumberOfRows()  # Counter equalling the total number of cases
     self.currentCaseFolder = None  # Represents the currently loaded case
 
+    self.resetGridShortCut = qt.QShortcut(slicer.util.mainWindow())
+    self.resetGridShortCut.setKey(qt.QKeySequence('Alt+R'))
+    self.resetGridShortCut.connect('activated()', self.onResetGrid)
+
   # ------------------------------------------------------------------------------
   def loadCase(self, case_idx):
     assert 0 <= case_idx < self.caseCount, 'case_idx %d is out of range (n cases: %d)' % (case_idx, self.caseCount)
@@ -308,6 +312,16 @@ class CaseTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
     self._save_node(node, self.currentCaseFolder, overwrite_existing)
 
   # ------------------------------------------------------------------------------
+  def onResetGrid(self):
+    self.logger.info('Snapping to IJK grid...')
+    # Snap to IJK to try and avoid rounding errors
+    sliceLogics = slicer.app.layoutManager().mrmlSliceLogics()
+    numLogics = sliceLogics.GetNumberOfItems()
+    for n in range(numLogics):
+      l = sliceLogics.GetItemAsObject(n)
+      l.SnapSliceOffsetToIJK()
+      
+  # ------------------------------------------------------------------------------
   def cleanupIterator(self):
     super(CaseTableIteratorLogic, self).cleanupIterator()
 
@@ -317,3 +331,8 @@ class CaseTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
     self.additionalMasks = None
     self.root = None
     self.patient = None
+
+    if hasattr(self, 'resetGridShortCut') and self.resetGridShortCut is not None:
+      self.resetGridShortCut.disconnect('activated()')
+      self.resetGridShortCut.setParent(None)
+      self.resetGridShortCut = None
