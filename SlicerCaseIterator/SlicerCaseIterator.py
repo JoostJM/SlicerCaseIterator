@@ -99,7 +99,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       'main': {
         'reader_name': self.txtReaderName.text,
         'selected_iterator': self.inputSelector.currentText,
-        'mulit_viewer': self.chkLayout.checked
+        'multi_viewer': self.chkLayout.checked
       }
     }
 
