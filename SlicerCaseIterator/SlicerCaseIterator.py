@@ -17,7 +17,8 @@ import os
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
 
-from SlicerCaseIteratorLib import get_iterators, IteratorBase
+
+from SlicerCaseIteratorLib import get_iterators, IteratorBase, LayoutLogic
 
 
 # ------------------------------------------------------------------------------
@@ -86,6 +87,9 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       if selected_iterator in self.inputWidgets:
         self.inputSelector.currentText = selected_iterator
 
+      if 'multi_viewer' in user_prefs['main']:
+        self.chkLayout.checked = int(user_prefs['main']['mulit_viewer'])
+
     for iterator in self.inputWidgets.values():
       if iterator.__module__ in user_prefs:
         iterator.setUserPreferences(user_prefs[iterator.__module__])
@@ -94,7 +98,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     user_prefs = {
       'main': {
         'reader_name': self.txtReaderName.text,
-        'selected_iterator': self.inputSelector.currentText
+        'selected_iterator': self.inputSelector.currentText,
+        'multi_viewer': self.chkLayout.checked
       }
     }
 
@@ -194,13 +199,13 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow('Reader name', self.txtReaderName)
 
     #
-    # Auto-redirect to SegmentEditor
+    # Auto-redirect to Segmentation Module
     #
 
     self.chkAutoRedirect = qt.QCheckBox()
     self.chkAutoRedirect.checked = 1
-    self.chkAutoRedirect.toolTip = 'Automatically switch module to "SegmentEditor" when each case is loaded'
-    parametersFormLayout.addRow('Go to Segment Editor', self.chkAutoRedirect)
+    self.chkAutoRedirect.toolTip = 'Automatically switch to segmentation module when each case is loaded'
+    parametersFormLayout.addRow('Go to segmentation module', self.chkAutoRedirect)
 
     #
     # Save masks
@@ -217,6 +222,15 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.chkSaveNewMasks.checked = 1
     self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
     parametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
+
+    #
+    # Side-by-side layout
+    #
+    self.chkLayout = qt.QCheckBox()
+    self.chkLayout.checked = 1
+    self.chkLayout.toolTip = 'If checked, all loaded volumes are displayed in separate viewers, ' \
+                             'otherwise a single viewer is shown'
+    parametersFormLayout.addRow('Mult-viewer', self.chkLayout)
 
     #
     # Previous Case
@@ -286,7 +300,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
                                              self.npStart.value,
                                              self.chkAutoRedirect.checked == 1,
                                              saveNew=(self.chkSaveNewMasks.checked == 1),
-                                             saveLoaded=(self.chkSaveMasks.checked == 1))
+                                             saveLoaded=(self.chkSaveMasks.checked == 1),
+                                             multiViewer=(self.chkLayout.checked == 1))
         self._setGUIstate()
       except Exception as e:
         self.logger.error('Error loading batch! %s', e)
@@ -413,14 +428,15 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  def __init__(self, iterator, start, redirect, saveNew=False, saveLoaded=False):
+  def __init__(self, iterator, start, redirect, saveNew=False, saveLoaded=False, multiViewer=False):
 
     self.logger = logging.getLogger('SlicerCaseIterator.logic')
 
     # Iterator class defining the iterable to iterate over cases
     assert isinstance(iterator, IteratorBase.IteratorLogicBase)
     self.iterator = iterator
-    assert self.iterator.caseCount >= start, 'No cases to process (%d cases, start %d)' % (self.iterator.caseCount, start)
+    assert self.iterator.caseCount >= start, \
+        'No cases to process (%d cases, start %d)' % (self.iterator.caseCount, start)
     self.currentIdx = start - 1  # Current case index (starts at 0 for fist case, -1 means nothing loaded)
 
     # Some variables that control the output (formatting and control of discarding/saving
@@ -430,91 +446,73 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Variables to hold references to loaded image and mask nodes
     self.currentCase = None
 
+    self.layoutLogic = LayoutLogic.CaseIteratorLayoutLogic()
+
     self.redirect = redirect
-    self._loadCase()
+    self.multiViewer = multiViewer
+    self._loadCase(self.currentIdx)
 
   def __del__(self):
     # Free up the references to the nodes to allow GC and prevent memory leaks
     self.logger.debug('Destroying Case Iterator Logic instance')
     self.currentCase = None
+    self.iterator.cleanupIterator()
     self.iterator = None
 
   # ------------------------------------------------------------------------------
   def nextCase(self):
-    self.currentIdx += 1
-    return self._loadCase()
+    return self._loadCase(self.currentIdx + 1)
 
   def previousCase(self):
-    self.currentIdx -= 1
-    return self._loadCase()
+    return self._loadCase(self.currentIdx - 1)
 
-  def _loadCase(self):
+  def _loadCase(self, new_idx):
     """
     This function proceeds to the next case. If a current case is open, it is saved if necessary and then closed.
     Next, a new case is obtained from the iterator, which is then loaded as the new ``currentCase``.
     If the last case was loaded, the iterator exits and resets the GUI to allow for loading a new batch of cases.
     :return: Boolean indicating whether the end of the batch is reached
     """
-    if self.currentIdx < 0:
-      self.currentIdx = 0
-      # Cannot select a negative index, so give a warning and exit the function
-      self.logger.warning('First case selected, cannot select previous case!')
-      return False
-
-    if self.currentCase is not None:
-      self._closeCase()
-
-    if self.currentIdx >= self.iterator.caseCount:
-      self.logger.info('########## All Done! ##########')
-      return True
-
     try:
-      self.currentCase = self.iterator.loadCase(self.currentIdx)
+      if new_idx < 0:
+        # Cannot select a negative index, so give a warning and exit the function
+        self.logger.warning('First case selected, cannot select previous case!')
+        return False
+
+      if self.currentCase is not None:
+        self._closeCase(new_idx)
+
+      if new_idx >= self.iterator.caseCount:
+        self.logger.info('########## All Done! ##########')
+        return True
+
+      self.currentCase = self.iterator.loadCase(new_idx)
       im, ma, add_im, add_ma = self.currentCase
 
-      # Set the slice viewers to the correct volumes
-      red_logic = slicer.app.layoutManager().sliceWidget('Red').sliceLogic().GetSliceCompositeNode()
-      green_logic = slicer.app.layoutManager().sliceWidget('Green').sliceLogic().GetSliceCompositeNode()
-      yellow_logic = slicer.app.layoutManager().sliceWidget('Yellow').sliceLogic().GetSliceCompositeNode()
-
-      red_logic.SetBackgroundVolumeID(im.GetID())
-      green_logic.SetBackgroundVolumeID(im.GetID())
-      yellow_logic.SetBackgroundVolumeID(im.GetID())
-
-      if len(add_im) > 0:
-        red_logic.SetForegroundVolumeID(add_im[0].GetID())
-        green_logic.SetForegroundVolumeID(add_im[0].GetID())
-        yellow_logic.SetForegroundVolumeID(add_im[0].GetID())
-
-      # Snap the viewers to the slice plane of the main image
-      self._rotateToVolumePlanes(im)
-
       if self.redirect:
-        if slicer.util.selectedModule() != 'SegmentEditor':
-          slicer.util.selectModule('SegmentEditor')
-        else:
-          slicer.modules.SegmentEditorWidget.enter()
+        self.iterator.backend.enter_module(im, ma)
 
-        # Explictly set the segmentation and master volume nodes
-        segmentEditorWidget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
-        if ma is not None:
-          segmentEditorWidget.setSegmentationNode(ma)
-        segmentEditorWidget.setMasterVolumeNode(im)
+      if self.multiViewer:
+        self.layoutLogic.viewerPerVolume(volumeNodes=[im] + add_im, label=ma)
+      else:
+        self.layoutLogic.viewerPerVolume(volumeNodes=[im], label=ma)
+
+      self.currentIdx = new_idx
 
     except Exception as e:
       self.logger.warning("Error loading new case: %s", e)
       self.logger.debug('', exc_info=True)
     return False
 
-  def _closeCase(self):
+  def _closeCase(self, new_idx):
     _, mask, _, additionalMasks = self.currentCase
     if self.saveLoaded:
       if mask is not None:
-        self.iterator.saveMask(mask)
+        self.iterator.saveMask(mask,)
       for ma in additionalMasks:
         self.iterator.saveMask(ma)
     if self.saveNew:
-      nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode')
+      nodes = [n for n in self.iterator.backend.getMaskNodes()
                if n not in additionalMasks and n != mask]
       for n in nodes:
         self.iterator.saveMask(n)
@@ -522,10 +520,9 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     # Remove reference to current case, signalling it is closed
     self.currentCase = None
 
-    if slicer.util.selectedModule() == 'SegmentEditor':
-      slicer.modules.SegmentEditorWidget.exit()
+    self.iterator.backend.exit_module()
 
-    if self.iterator.should_close(self.currentIdx):
+    if self.iterator.should_close(new_idx):
       # Close the scene and start a fresh one
       self.logger.debug("Closing scene and starting a new one")
       slicer.mrmlScene.Clear(0)
@@ -534,17 +531,5 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     else:
       # Keep the images loaded, but remove the segmentation nodes
       self.logger.debug("Removing segmentation nodes from current scene")
-      for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode'):
+      for n in self.iterator.backend.getMaskNodes():
         slicer.mrmlScene.RemoveNode(n)
-
-  # ------------------------------------------------------------------------------
-  def _rotateToVolumePlanes(self, referenceVolume):
-    sliceNodes = slicer.util.getNodes('vtkMRMLSliceNode*')
-    for name, node in sliceNodes.items():
-      node.RotateToVolumePlane(referenceVolume)
-    # Snap to IJK to try and avoid rounding errors
-    sliceLogics = slicer.app.layoutManager().mrmlSliceLogics()
-    numLogics = sliceLogics.GetNumberOfItems()
-    for n in range(numLogics):
-      l = sliceLogics.GetItemAsObject(n)
-      l.SnapSliceOffsetToIJK()
