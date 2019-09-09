@@ -88,7 +88,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
         self.inputSelector.currentText = selected_iterator
 
       if 'multi_viewer' in user_prefs['main']:
-        self.chkLayout.checked = int(user_prefs['main']['mulit_viewer'])
+        self.chkLayout.checked = user_prefs['main']['multi_viewer'] == 'True'
 
     for iterator in self.inputWidgets.values():
       if iterator.__module__ in user_prefs:
