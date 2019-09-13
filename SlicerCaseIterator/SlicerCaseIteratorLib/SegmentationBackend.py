@@ -1,6 +1,7 @@
 from abc import abstractmethod
 import logging
 import os
+import re
 
 import vtk, qt, ctk, slicer
 
@@ -26,6 +27,12 @@ class SegmentationBackendBase(object):
     This function is called when the segmentation module should be exited, by calling the
     correct "exit" function.
     """
+
+  def observe_mask_node(self, node):
+    pass
+
+  def remove_mask_node_observers(self):
+    pass
 
   @abstractmethod
   def loadMask(self, mask_path, ref_image=None):
@@ -169,6 +176,11 @@ class EditorBackend(SegmentationBackendBase):
 
 
 class SegmentEditorBackend(SegmentationBackendBase):
+  def __init__(self):
+    super(SegmentEditorBackend, self).__init__()
+    self.mask_node_observers = []
+    self.prefixes = {}
+
   def enter_module(self, master_image_node, master_mask_node):
     """
     This function is called when the segmentation module should be entered, either by switching to, or calling the
@@ -195,6 +207,50 @@ class SegmentEditorBackend(SegmentationBackendBase):
     """
     if slicer.util.selectedModule() == 'SegmentEditor':
       slicer.modules.SegmentEditorWidget.exit()
+
+  def observe_mask_node(self, node):
+    if node is None:
+      self.logger.debug("No node to observe passed. Skipping adding observer")
+      return
+
+    # Observe the SegmentAdded event to enable changing the auto-naming behaviour
+    segmentation = node.GetSegmentation()
+    self.mask_node_observers.append((node, segmentation.AddObserver(segmentation.SegmentAdded, self.onSegmentAdded)))
+
+    # Store the prefix we want to use, as the event only passes the segmentation,
+    # not the segmentationNode
+    self.prefixes[segmentation.GetAddressAsString(None)] = node.GetName()
+
+  def remove_mask_node_observers(self):
+    if len(self.mask_node_observers) == 0:
+      self.logger.debug("Not observing any node!")
+
+    for node, obs in self.mask_node_observers:
+      segmentation = node.GetSegmentation()
+      segmentation.RemoveObserver(obs)
+      seg_addr = segmentation.GetAddressAsString(None)
+      if seg_addr in self.prefixes:
+        del self.prefixes[seg_addr]
+    self.mask_node_observers = []
+
+  def onSegmentAdded(self, caller, event):
+    # caller is vtkSegment, not vtkMRMLSegmentationNode!
+    try:
+      # Get the last added segment, and check if it is a new empty segment with standard name
+      new_segment = caller.GetNthSegment(caller.GetNumberOfSegments() - 1)
+      name_match = re.match(r'Segment_(?P<seg_no>\d+)', new_segment.GetName())
+      seg_addr = caller.GetAddressAsString(None)  # Needed to look up prefix
+
+      if seg_addr not in self.prefixes:
+        self.logger.debug('Segment added, but segmentation does not have a prefix set. Skipping setting name')
+      elif name_match is None:
+        self.logger.debug('Segment added, but non-standard name. Possibly imported segment. Skipping setting name')
+      else:
+        new_name = self.prefixes[seg_addr] + '_%s' % name_match.groupdict()['seg_no']
+        self.logger.debug('Segment added, Auto-setting name to %s', new_name)
+        new_segment.SetName(new_name)
+    except Exception:
+      self.logger.warning('Error setting new name for segment!', exc_info=True)
 
   def loadMask(self, mask_path, ref_image=None):
     """

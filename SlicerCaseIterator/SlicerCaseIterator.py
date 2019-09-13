@@ -491,6 +491,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
       if self.redirect:
         self.iterator.backend.enter_module(im, ma)
+        self.iterator.backend.observe_mask_node(ma)
 
       if self.multiViewer:
         self.layoutLogic.viewerPerVolume(volumeNodes=[im] + add_im, label=ma)
@@ -509,6 +510,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     if self.saveLoaded:
       if mask is not None:
         self.iterator.saveMask(mask,)
+        self.iterator.backend.remove_mask_node_observers()
       for ma in additionalMasks:
         self.iterator.saveMask(ma)
     if self.saveNew:
