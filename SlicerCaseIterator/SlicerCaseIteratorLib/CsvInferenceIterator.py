@@ -1,7 +1,10 @@
 import os
 from collections import OrderedDict
 
-import vtk, qt, ctk, slicer
+import vtk
+import qt
+import ctk
+import slicer
 
 from . import IteratorBase
 
@@ -408,7 +411,6 @@ class CsvInferenceIteratorLogic(IteratorBase.IteratorLogicBase):
     """
     caseIdx = caseIdx if caseIdx is not None else self.currentIdx
     caseData = self.parameterNode.GetParameter("CaseData_{}".format(caseIdx))
-    self.logger.info("Setting CaseData_{}".format(caseIdx))
     if caseData:
       caseData = eval(caseData)
       im_node = slicer.mrmlScene.GetNodeByID(caseData["InputImage_ID"])
@@ -416,7 +418,6 @@ class CsvInferenceIteratorLogic(IteratorBase.IteratorLogicBase):
       pred_mask_nodes = list(map(slicer.mrmlScene.GetNodeByID, caseData["PRED_Mask_IDs"]))
       return im_node, gt_mask_nodes, pred_mask_nodes
     else:
-      self.logger.info("CaseData_{} is empty".format(caseIdx))
       return None
 
   # ------------------------------------------------------------------------------
@@ -531,6 +532,14 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
                                           "Dice_Reference_volume_cc": "GetReferenceVolumeCc",
                                           "Dice_Compare_volume_cc": "GetCompareVolumeCc"})
 
+  # NB: all additional metrics take gt, pred as inputs as either numpy or segmentation nodes
+  ADDITIONAL_METRIC_GETTERS = OrderedDict()
+
+  @classmethod
+  def registerAdditionalMetric(cls, name, callback):
+    if name not in cls.ADDITIONAL_METRIC_GETTERS.keys() and callable(callback) is True:
+      cls.ADDITIONAL_METRIC_GETTERS[name] = callback
+
   @staticmethod
   def showSegmentation(segmentationNode):
     segmentationNode.CreateClosedSurfaceRepresentation()
@@ -584,8 +593,12 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
       self.logger.warning("Error loading new case: %s", e.message)
       self.logger.debug('', exc_info=True)
 
+  def onCaseAboutToClose(self, caller, *args, **kwargs):
+    if self._onQuantificationRowChanged is not None:
+      self.fourUpTableView.selectionModel().selectionChanged.disconnect(self._onQuantificationRowChanged)
+
   def initializeTableHeader(self, caller):
-    for colName in ["Segments"] + list(self.COMPARISON_NAMES_GETTERS.keys()):
+    for colName in ["Segments"] + list(self.COMPARISON_NAMES_GETTERS.keys()) + list(self.ADDITIONAL_METRIC_GETTERS.keys()):
       col = caller.table.AddColumn()
       col.SetName(colName)
 
@@ -625,23 +638,22 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
 
   def createSegmentsComparison(self, gt_ma, pred_ma, table):
     for rowIdx, (gt_seg, pred_seg) in enumerate(zip(gt_ma, pred_ma)):
-      # NB: assuming that every imported mask has only one segment
-      segmentComparisonNode = self._compareSegments(gt_seg, pred_seg, gt_seg, pred_seg)
+      assert len(CsvInferenceIteratorLogic.getAllSegmentIDs(gt_seg)) == 1
+      assert len(CsvInferenceIteratorLogic.getAllSegmentIDs(pred_seg)) == 1
+
+      segmentComparisonStats = self._compareSegments(gt_seg, pred_seg)
+      additionalMetrics = self._runAdditionalMetrics(gt_seg, pred_seg)
 
       rowIdx = table.AddEmptyRow()
       table.SetCellText(rowIdx, 0, "{}/{}".format(gt_seg.GetName(), pred_seg.GetName()))
 
-      if segmentComparisonNode:
-        for colIdx, getter in enumerate(self.COMPARISON_NAMES_GETTERS.values(), start=1):
-          table.SetCellText(rowIdx, colIdx, str(getattr(segmentComparisonNode, getter)()))
-      slicer.mrmlScene.RemoveNode(segmentComparisonNode)
+      for colIdx, stats in enumerate(segmentComparisonStats + additionalMetrics, start=1):
+        table.SetCellText(rowIdx, colIdx, stats)
 
-  def _compareSegments(self, gt_seg_node, pred_seg_node, gt_seg, pred_seg):
-    try:
-      gt_seg_id = CsvInferenceIteratorLogic.getAllSegmentIDs(gt_seg)[-1]
-      pred_seg_id = CsvInferenceIteratorLogic.getAllSegmentIDs(pred_seg)[-1]
-    except IndexError:
-      return None
+  def _compareSegments(self, gt_seg_node, pred_seg_node):
+    gt_seg_id = self.getSegmentID(gt_seg_node)
+    pred_seg_id = self.getSegmentID(pred_seg_node)
+
     segmentComparisonNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentComparisonNode', 'Inference')
     segmentComparisonNode.SetAndObserveReferenceSegmentationNode(gt_seg_node)
     segmentComparisonNode.SetReferenceSegmentID(gt_seg_id)
@@ -650,8 +662,20 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
     segmentComparisonLogic = slicer.modules.segmentcomparison.logic()
     segmentComparisonLogic.ComputeHausdorffDistances(segmentComparisonNode)
     segmentComparisonLogic.ComputeDiceStatistics(segmentComparisonNode)
-    return segmentComparisonNode
 
-  def onCaseAboutToClose(self, caller, *args, **kwargs):
-    if self._onQuantificationRowChanged is not None:
-      self.fourUpTableView.selectionModel().selectionChanged.disconnect(self._onQuantificationRowChanged)
+    stats = list()
+    for getter in self.COMPARISON_NAMES_GETTERS.values():
+      stats.append(str(getattr(segmentComparisonNode, getter)()))
+
+    slicer.mrmlScene.RemoveNode(segmentComparisonNode)
+    return stats
+
+  def getSegmentID(self, seg_node):
+    return CsvInferenceIteratorLogic.getAllSegmentIDs(seg_node)[0]
+
+  def _runAdditionalMetrics(self, gt_seg_node, pred_seg_node):
+    stats = list()
+
+    for getter in self.ADDITIONAL_METRIC_GETTERS.values():
+      stats.append(str(getter(gt_seg_node, pred_seg_node)))
+    return stats
