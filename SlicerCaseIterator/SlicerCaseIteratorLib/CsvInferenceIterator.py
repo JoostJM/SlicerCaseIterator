@@ -118,6 +118,13 @@ class CsvInferenceIteratorWidget(IteratorBase.IteratorWidgetBase):
     iterationParametersFormLayout.addRow('Preload cases', self.preloadCases)
 
     #
+    # Output Case Table Directory
+    #
+    self.tableOutputDirectory = ctk.ctkPathLineEdit()
+    self.tableOutputDirectory.filters = ctk.ctkPathLineEdit.Dirs
+    iterationParametersFormLayout.addRow('Case tables output dir', self.tableOutputDirectory)
+
+    #
     # Progressbar
     #
     self.progressBar = qt.QProgressBar()
@@ -164,7 +171,8 @@ class CsvInferenceIteratorWidget(IteratorBase.IteratorWidgetBase):
 
     self._iterator = CsvInferenceIteratorLogic(self.tableNode, columnMap, cacheCases=self.cacheCases.checked)
     self._iterator.registerEventListener(
-      CsvTableEventHandler(reader=reader)
+      CsvTableEventHandler(reader=reader,
+                           tableOutputDir=self.tableOutputDirectory.currentPath)
     )
     if self.preloadCases.checked:
       self._preload()
@@ -567,11 +575,22 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
       l = sliceLogics.GetItemAsObject(n)
       l.FitSliceToAll()
 
-  def __init__(self, reader=None):
+  def __init__(self, reader=None, tableOutputDir=None):
     super(CsvTableEventHandler, self).__init__()
 
     self.reader = reader
+    self.tableOutputDirectory = tableOutputDir
     self._onQuantificationRowChanged = None
+
+  @staticmethod
+  def writeTableNodeToCsv(tableNode, outputDir):
+    writer = vtk.vtkDelimitedTextWriter()
+    filepath = os.path.join(outputDir, tableNode.GetName()+".csv")
+    writer.SetFileName(filepath)
+    writer.SetInputData(tableNode.GetTable())
+    writer.SetFieldDelimiter(",")
+    if not writer.Write():
+      raise Exception('Failed to write file: ' + filepath)
 
   def onCaseLoaded(self, caller, *args, **kwargs):
     try:
@@ -587,6 +606,9 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
       if caller.table.GetNumberOfRows() == 0:
         self.initializeTableHeader(caller)
         self.createSegmentsComparison(gt_ma, pred_ma, caller.table)
+
+        if self.tableOutputDirectory != "" and os.path.exists(self.tableOutputDirectory):
+          self.writeTableNodeToCsv(caller.table, self.tableOutputDirectory)
 
       self.setupFourUpTableViewConnection(caller)
     except Exception as e:
