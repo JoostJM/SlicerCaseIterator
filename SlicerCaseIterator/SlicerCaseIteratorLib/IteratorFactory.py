@@ -38,7 +38,7 @@ class IteratorFactory(object):
 
   @staticmethod
   def getImplementationNames():
-    return IteratorFactory.IMPLEMENTATIONS.keys()
+    return list(IteratorFactory.IMPLEMENTATIONS.keys())
 
   @staticmethod
   @onExceptionReturnNone

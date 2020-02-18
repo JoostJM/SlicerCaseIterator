@@ -12,6 +12,7 @@
 # ========================================================================
 
 import os
+import ast
 
 import qt, ctk, slicer
 
@@ -350,7 +351,7 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
   def closeCase(self):
     self._eventListeners.caseAboutToClose(self.parameterNode)
-    caseData = eval(self.parameterNode.GetParameter("CaseData"))
+    caseData = ast.literal_eval(self.parameterNode.GetParameter("CaseData"))
 
     self.removeNodeByID(caseData["InputImage_ID"])
     self.removeNodeByID(caseData["InputMask_ID"])
