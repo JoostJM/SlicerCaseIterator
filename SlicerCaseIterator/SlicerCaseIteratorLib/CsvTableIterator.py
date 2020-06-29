@@ -13,7 +13,7 @@
 
 import os
 import ast
-
+from collections import deque
 import qt, ctk, slicer
 
 from . import IteratorBase
@@ -355,8 +355,8 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
     self.removeNodeByID(caseData["InputImage_ID"])
     self.removeNodeByID(caseData["InputMask_ID"])
-    map(self.removeNodeByID, caseData["Additional_InputImage_IDs"])
-    map(self.removeNodeByID, caseData["Additional_InputMask_IDs"])
+    deque(map(self.removeNodeByID, caseData["Additional_InputImage_IDs"]))
+    deque(map(self.removeNodeByID, caseData["Additional_InputMask_IDs"]))
     self.currentIdx = None
 
   def getCaseData(self):
@@ -531,7 +531,9 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
         segmentEditorWidget.setMasterVolumeNode(im)
 
     except Exception as e:
-      self.logger.warning("Error loading new case: %s", e.message)
+      if slicer.app.majorVersion * 100 + slicer.app.minorVersion < 411:
+        e = e.message
+      self.logger.warning("Error loading new case: %s", e)
       self.logger.debug('', exc_info=True)
 
   def onCaseAboutToClose(self, caller, *args, **kwargs):
@@ -547,7 +549,7 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
       nodes = [n for n in slicer.util.getNodesByClass('vtkMRMLSegmentationNode')
                if n not in additionalMasks and n != mask]
 
-      map(lambda n: self.saveMask(n, self.reader, caseData), nodes)
+      deque(map(lambda n: self.saveMask(n, self.reader, caseData), nodes))
 
     if slicer.util.selectedModule() == 'SegmentEditor':
       slicer.modules.SegmentEditorWidget.exit()

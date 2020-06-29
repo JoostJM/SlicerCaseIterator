@@ -1,5 +1,5 @@
 import os
-from collections import OrderedDict
+from collections import OrderedDict, deque
 
 import vtk
 import qt
@@ -304,8 +304,8 @@ class CsvInferenceIteratorLogic(IteratorBase.IteratorLogicBase):
           self.logger.info("Deleting casedata for {}".format(caseIdx))
           im, gt_ma, pred_ma = caseData
           slicer.mrmlScene.RemoveNode(im)
-          map(slicer.mrmlScene.RemoveNode, gt_ma)
-          map(slicer.mrmlScene.RemoveNode, pred_ma)
+          deque(map(slicer.mrmlScene.RemoveNode, gt_ma))
+          deque(map(slicer.mrmlScene.RemoveNode, pred_ma))
           self.parameterNode.UnsetParameter("CaseData_{}".format(caseIdx))
           if caseIdx in list(self._tablesCache.keys()):
             slicer.mrmlScene.RemoveNode(self._tablesCache[caseIdx])
@@ -405,8 +405,8 @@ class CsvInferenceIteratorLogic(IteratorBase.IteratorLogicBase):
 
       if not self.cacheCases:
         slicer.mrmlScene.RemoveNode(im)
-        map(slicer.mrmlScene.RemoveNode, gt_ma)
-        map(slicer.mrmlScene.RemoveNode, pred_ma)
+        deque(map(slicer.mrmlScene.RemoveNode, gt_ma))
+        deque(map(slicer.mrmlScene.RemoveNode, pred_ma))
         self.parameterNode.UnsetParameter("CaseData_{}".format(self.currentIdx))
         if self._table:
           slicer.mrmlScene.RemoveNode(self._table)
@@ -612,7 +612,9 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
 
       self.setupFourUpTableViewConnection(caller)
     except Exception as e:
-      self.logger.warning("Error loading new case: %s", e.message)
+      if slicer.app.majorVersion * 100 + slicer.app.minorVersion < 411:
+        e = e.message
+      self.logger.warning("Error loading new case: %s", e)
       self.logger.debug('', exc_info=True)
 
   def onCaseAboutToClose(self, caller, *args, **kwargs):
@@ -640,7 +642,7 @@ class CsvTableEventHandler(IteratorBase.IteratorEventHandlerBase):
       self.hideAllSegmentations()
       if selectedRows:
         _, gt_masks, pred_masks = caller.getCaseData()
-        zipped = zip(gt_masks, pred_masks)
+        zipped = list(zip(gt_masks, pred_masks))
 
         for selectedRow in selectedRows:
           gt_mask, pred_mask = zipped[selectedRow]
