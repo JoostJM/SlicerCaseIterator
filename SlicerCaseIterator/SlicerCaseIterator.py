@@ -13,7 +13,8 @@
 
 import logging
 
-import os, qt, ctk, slicer
+import qt, ctk, slicer
+from collections import deque
 from slicer.ScriptedLoadableModule import *
 
 from SlicerDevelopmentToolboxUtils.buttons import *
@@ -217,8 +218,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.previousButton.connect('clicked(bool)', self.onPrevious)
     self.nextButton.connect('clicked(bool)', self.onNext)
     self.resetButton.connect('clicked(bool)', self.onReset)
-    self.sliceFill2DSlider.valueChanged.connect(lambda value: self.updateSegmentationProperties())
-    self.sliceOutline2DSlider.valueChanged.connect(lambda value: self.updateSegmentationProperties())
+    self.sliceFill2DSlider.valueChanged.connect(self.updateSegmentationProperties)
+    self.sliceOutline2DSlider.valueChanged.connect(self.updateSegmentationProperties)
 
     if len(modes) == 1:
       self.modeComboBox.hide()
@@ -259,7 +260,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.resetButton.enabled = is_valid
 
   # ------------------------------------------------------------------------------
-  def updateSegmentationProperties(self):
+  def updateSegmentationProperties(self, value=None):
     def update(segNode):
       try:
         segNode.GetDisplayNode().SetOpacity2DFill(self.sliceFill2DSlider.value)
@@ -267,7 +268,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       except AttributeError:
         pass
 
-    map(update, slicer.util.getNodesByClass("vtkMRMLSegmentationNode"))
+    deque(map(update, slicer.util.getNodesByClass("vtkMRMLSegmentationNode")))
 
   # ------------------------------------------------------------------------------
   def onReset(self):
@@ -288,7 +289,9 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
         self._setGUIstate()
         self._unlockGUI(True)
       except Exception as e:
-        self.logger.error('Error loading batch! %s', e.message)
+        if slicer.app.majorVersion * 100 + slicer.app.minorVersion < 411:
+          e = e.message
+        self.logger.error('Error loading batch! %s', e)
         self.logger.debug('', exc_info=True)
         self._setGUIstate(csv_loaded=False)
 
