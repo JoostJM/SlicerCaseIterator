@@ -20,7 +20,7 @@ from slicer.ScriptedLoadableModule import *
 from SlicerDevelopmentToolboxUtils.buttons import *
 from SlicerDevelopmentToolboxUtils.mixins import ModuleWidgetMixin
 
-from SlicerCaseIteratorLib import IteratorBase, CsvTableIterator
+from SlicerCaseIteratorLib import IteratorBase
 from SlicerCaseIteratorLib.IteratorFactory import IteratorFactory
 
 
@@ -36,7 +36,7 @@ class SlicerCaseIterator(ScriptedLoadableModule):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = 'Case Iterator'
     self.parent.categories = ['Utilities']
-    self.parent.dependencies = ["SlicerDevelopmentToolbox", "SegmentComparison"]
+    self.parent.dependencies = ["SlicerDevelopmentToolbox"]
     self.parent.contributors = ["Joost van Griethuysen (AVL-NKI), Christian Herz (CHOP)"]
     self.parent.helpText = """
     This is a scripted loadable module to iterate over a batch of images (with/without prior segmentations) for 

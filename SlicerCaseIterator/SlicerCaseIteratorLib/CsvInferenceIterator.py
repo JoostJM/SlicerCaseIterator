@@ -16,6 +16,12 @@ from . import IteratorBase
 class CsvInferenceIteratorWidget(IteratorBase.IteratorWidgetBase):
 
   def __init__(self):
+
+    try:
+      slicer.modules.segmentcomparison
+    except AttributeError:
+      raise Exception("Module 'SegmentComparison' not found but required. Consider installing SlicerRT extension")
+
     super(CsvInferenceIteratorWidget, self).__init__()
 
     self.tableNode = None

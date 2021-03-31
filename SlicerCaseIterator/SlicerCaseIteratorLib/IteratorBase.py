@@ -112,7 +112,7 @@ class IteratorLogicBase(object):
 
   - caseCount: Integer specifying how many cases are present in the batch defined by this iterator
   - loadCase: Function to load a certain case, specified by the passed `case_idx`
-  - loadCase: Function called by the logic to close currently opened case
+  - closeCase: Function called by the logic to close currently opened case
   - saveMask: Function to store a loaded or new mask.
   """
 
