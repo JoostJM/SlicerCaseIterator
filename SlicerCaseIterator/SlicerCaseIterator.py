@@ -17,9 +17,6 @@ import qt, ctk, slicer
 from collections import deque
 from slicer.ScriptedLoadableModule import *
 
-from SlicerDevelopmentToolboxUtils.buttons import *
-from SlicerDevelopmentToolboxUtils.mixins import ModuleWidgetMixin
-
 from SlicerCaseIteratorLib import IteratorBase
 from SlicerCaseIteratorLib.IteratorFactory import IteratorFactory
 
@@ -36,7 +33,7 @@ class SlicerCaseIterator(ScriptedLoadableModule):
     ScriptedLoadableModule.__init__(self, parent)
     self.parent.title = 'Case Iterator'
     self.parent.categories = ['Utilities']
-    self.parent.dependencies = ["SlicerDevelopmentToolbox"]
+    self.parent.dependencies = []
     self.parent.contributors = ["Joost van Griethuysen (AVL-NKI), Christian Herz (CHOP)"]
     self.parent.helpText = """
     This is a scripted loadable module to iterate over a batch of images (with/without prior segmentations) for 
@@ -228,14 +225,22 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self._setGUIstate(csv_loaded=False)
 
   def setupViewSettingsArea(self):
-    self.fourUpSliceLayoutButton = FourUpLayoutButton()
-    self.fourUpSliceTableViewLayoutButton = FourUpTableViewLayoutButton()
-    self.crosshairButton = CrosshairButton()
-    self.crosshairButton.setSliceIntersectionEnabled(True)
+    try:
+      from SlicerDevelopmentToolboxUtils.buttons import FourUpLayoutButton, FourUpTableViewLayoutButton, CrosshairButton
+      from SlicerDevelopmentToolboxUtils.mixins import ModuleWidgetMixin
 
-    hbox = ModuleWidgetMixin.createHLayout([self.fourUpSliceLayoutButton,
-                                            self.fourUpSliceTableViewLayoutButton, self.crosshairButton])
-    self.layout.addWidget(hbox)
+      self.fourUpSliceLayoutButton = FourUpLayoutButton()
+      self.fourUpSliceTableViewLayoutButton = FourUpTableViewLayoutButton()
+      self.crosshairButton = CrosshairButton()
+      self.crosshairButton.setSliceIntersectionEnabled(True)
+
+      hbox = ModuleWidgetMixin.createHLayout([self.fourUpSliceLayoutButton,
+                                              self.fourUpSliceTableViewLayoutButton, self.crosshairButton])
+      self.layout.addWidget(hbox)
+    except ModuleNotFoundError:
+      logging.info("Skipping (optional) view settings area: SlicerDevelopmentToolbox was not found which is required "
+                   "for setting up the view settings area.  Please Install SlicerDevelopmentToolbox from the extension "
+                   "manager if you want to make use of it.")
 
   # ------------------------------------------------------------------------------
   def enter(self):
