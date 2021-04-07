@@ -1,5 +1,6 @@
 from . import CsvTableIterator
 from . import CsvInferenceIterator
+from . import IteratorBase
 from functools import wraps
 import logging
 
@@ -21,6 +22,16 @@ class IteratorFactory(object):
     "simple_csv_iteration": CsvTableIterator.CaseTableIteratorWidget,
     "mask_comparison": CsvInferenceIterator.CsvInferenceIteratorWidget
   }
+
+  @classmethod
+  def registerIteratorWidget(cls, name, widget):
+    if name in cls.IMPLEMENTATIONS.keys():
+      logging.warning(f"Iterator {name} is already registered")
+      return
+    if not issubclass(widget, IteratorBase.IteratorWidgetBase):
+      logging.warning(f"Widget {widget} is no subclass of IteratorBase.IteratorWidgetBase")
+      return
+    cls.IMPLEMENTATIONS[name] = widget
 
   @staticmethod
   def reloadSourceFiles():
