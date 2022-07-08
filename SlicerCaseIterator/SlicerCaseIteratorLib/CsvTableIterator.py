@@ -297,10 +297,7 @@ class CaseTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
       self.logger.warning('Volume file %s does not exist, skipping...', fname)
       return None
 
-    load_success, im_node = slicer.util.loadVolume(im_path, returnNode=True)
-    if not load_success:
-      self.logger.warning('Failed to load ' + im_path)
-      return None
+    im_node = slicer.util.loadVolume(im_path)
 
     # Use the file basename as the name for the loaded volume
     im_node.SetName(os.path.splitext(os.path.basename(im_path))[0])

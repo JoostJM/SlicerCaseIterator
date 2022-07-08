@@ -121,31 +121,27 @@ class EditorBackend(SegmentationBackendBase):
       # split off .seg
       file_base = os.path.splitext(file_base)[0]
 
-      load_success, ma_node = slicer.util.loadSegmentation(mask_path, returnNode=True)
-      if load_success:
-        label_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
-        load_success = slicer.modules.segmentations.logic().ExportAllSegmentsToLabelmapNode(ma_node, label_node)
+      ma_node = slicer.util.loadSegmentation(mask_path)
 
-        slicer.mrmlScene.RemoveNode(ma_node)
-        ma_node = label_node
+      label_node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode')
+      slicer.modules.segmentations.logic().ExportAllSegmentsToLabelmapNode(ma_node, label_node)
 
-        # Add a storage node for this segmentation node
-        store_node = label_node.CreateDefaultStorageNode()
-        slicer.mrmlScene.AddNode(store_node)
-        label_node.SetAndObserveStorageNodeID(store_node.GetID())
+      slicer.mrmlScene.RemoveNode(ma_node)
+      ma_node = label_node
 
-        store_node.SetFileName('%s.nrrd' % file_base)
+      # Add a storage node for this segmentation node
+      store_node = label_node.CreateDefaultStorageNode()
+      slicer.mrmlScene.AddNode(store_node)
+      label_node.SetAndObserveStorageNodeID(store_node.GetID())
 
-        # UnRegister the storage node to prevent a memory leak
-        store_node.UnRegister(None)
+      store_node.SetFileName('%s.nrrd' % file_base)
+
+      # UnRegister the storage node to prevent a memory leak
+      store_node.UnRegister(None)
     else:
       self.logger.debug('Loading labelmap')
       # If not segmentation, then load as labelmap then convert to segmentation
-      load_success, ma_node = slicer.util.loadLabelVolume(mask_path, returnNode=True)
-
-    if not load_success:
-      self.logger.warning('Failed to load ' + mask_path)
-      return None
+      ma_node = slicer.util.loadLabelVolume(mask_path)
 
     # Use the file basename as the name for the newly loaded segmentation node
     ma_node.SetName(file_base)
@@ -277,35 +273,31 @@ class SegmentEditorBackend(SegmentationBackendBase):
       # split off .seg
       file_base = os.path.splitext(file_base)[0]
 
-      load_success, ma_node = slicer.util.loadSegmentation(mask_path, returnNode=True)
+      ma_node = slicer.util.loadSegmentation(mask_path)
     else:
       self.logger.debug('Loading labelmap and converting to segmentation')
       # If not segmentation, then load as labelmap then convert to segmentation
-      load_success, ma_node = slicer.util.loadLabelVolume(mask_path, returnNode=True)
-      if load_success:
-        # Only try to make a segmentation node if Slicer was able to load the label map
-        seg_node = slicer.vtkMRMLSegmentationNode()
-        slicer.mrmlScene.AddNode(seg_node)
-        if ref_image is not None:
-          seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_image)
-        load_success = slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node)
-        slicer.mrmlScene.RemoveNode(ma_node)
-        ma_node = seg_node
+      ma_node = slicer.util.loadLabelVolume(mask_path)
 
-        # Add a storage node for this segmentation node
-        file_base, ext = os.path.splitext(mask_path)
-        store_node = seg_node.CreateDefaultStorageNode()
-        slicer.mrmlScene.AddNode(store_node)
-        seg_node.SetAndObserveStorageNodeID(store_node.GetID())
+      seg_node = slicer.vtkMRMLSegmentationNode()
+      slicer.mrmlScene.AddNode(seg_node)
+      if ref_image is not None:
+        seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_image)
 
-        store_node.SetFileName('%s.seg.nrrd' % file_base)
+      slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(ma_node, seg_node)
+      slicer.mrmlScene.RemoveNode(ma_node)
+      ma_node = seg_node
 
-        # UnRegister the storage node to prevent a memory leak
-        store_node.UnRegister(None)
+      # Add a storage node for this segmentation node
+      file_base, ext = os.path.splitext(mask_path)
+      store_node = seg_node.CreateDefaultStorageNode()
+      slicer.mrmlScene.AddNode(store_node)
+      seg_node.SetAndObserveStorageNodeID(store_node.GetID())
 
-    if not load_success:
-      self.logger.warning('Failed to load ' + mask_path)
-      return None
+      store_node.SetFileName('%s.seg.nrrd' % file_base)
+
+      # UnRegister the storage node to prevent a memory leak
+      store_node.UnRegister(None)
 
     # Use the file basename as the name for the newly loaded segmentation node
     ma_node.SetName(file_base)
