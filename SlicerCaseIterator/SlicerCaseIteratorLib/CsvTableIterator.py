@@ -24,8 +24,8 @@ from . import IteratorBase, SegmentationBackend
 
 class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 
-  def __init__(self):
-    super(CaseTableIteratorWidget, self).__init__()
+  def __init__(self, parent):
+    super().__init__(parent)
 
     self.tableNode = None
     self.tableStorageNode = None

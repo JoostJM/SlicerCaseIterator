@@ -35,8 +35,9 @@ class IteratorWidgetBase(object):
   the iterator over a batch (should treated as "cancel the review/updates of this case", but not stop the iteration).
   """
 
-  def __init__(self):
+  def __init__(self, parent):
     self.logger = logging.getLogger('SlicerCaseIterator.IteratorWidget')
+    self.parent = parent
     self.validationHandler = None
     self.layout = None
 
@@ -119,10 +120,11 @@ class IteratorLogicBase(object):
   :param backend: instance derived from SegmentationBackend.SegmentationBackendBase, that can handle loading a mask
   """
 
-  def __init__(self, reader, backend):
+  def __init__(self, reader, backend, overwrite=False):
     self.logger = logging.getLogger('SlicerCaseIterator.Iterator')
     self.caseCount = None
     self.reader = reader
+    self.overwrite = overwrite
     assert isinstance(backend, SegmentationBackend.SegmentationBackendBase)
     self.backend = backend
 
@@ -209,8 +211,8 @@ class IteratorLogicBase(object):
 
 class TableIteratorLogicBase(IteratorLogicBase):
 
-  def __init__(self, reader, backend, tableNode, tableModifiedTime):
-    super(TableIteratorLogicBase, self).__init__(reader, backend)
+  def __init__(self, reader, backend, tableNode, tableModifiedTime, overwrite=False):
+    super(TableIteratorLogicBase, self).__init__(reader, backend, overwrite)
 
     assert tableNode is not None, 'No table selected! Cannot instantiate batch'
 

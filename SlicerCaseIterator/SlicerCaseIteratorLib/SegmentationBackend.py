@@ -194,7 +194,7 @@ class SegmentEditorBackend(SegmentationBackendBase):
     segmentEditorWidget = slicer.modules.segmenteditor.widgetRepresentation().self().editor
     if master_mask_node is not None:
       segmentEditorWidget.setSegmentationNode(master_mask_node)
-    segmentEditorWidget.setMasterVolumeNode(master_image_node)
+    segmentEditorWidget.setSourceVolumeNode(master_image_node)
 
   def exit_module(self):
     """
@@ -312,6 +312,7 @@ class SegmentEditorBackend(SegmentationBackendBase):
     """
     seg_node = slicer.vtkMRMLSegmentationNode()
     slicer.mrmlScene.AddNode(seg_node)
+    seg_node.GetSegmentation().AddEmptySegment()
     seg_node.SetReferenceImageGeometryParameterFromVolumeNode(ref_image)
     if node_name is None:
       seg_node.SetName('%s_segmentation' % ref_image.GetName())

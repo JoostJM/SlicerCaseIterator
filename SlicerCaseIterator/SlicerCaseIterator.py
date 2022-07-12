@@ -147,7 +147,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 
     iterators = get_iterators()
     for it in iterators:
-      self.inputWidgets[it] = iterators[it][0]()  # 1st item in the value is the widget, 2nd the logic
+      self.inputWidgets[it] = iterators[it][0](self)  # 1st item in the value is the widget, 2nd the logic
       hdrs.append(it)
 
     self.inputSelector = qt.QComboBox()
@@ -429,7 +429,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
   """
 
   def __init__(self, iterator, start, redirect, saveNew=False, saveLoaded=False, multiViewer=False):
-
+    super().__init__()
     self.logger = logging.getLogger('SlicerCaseIterator.logic')
 
     # Iterator class defining the iterable to iterate over cases
@@ -450,11 +450,16 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
 
     self.redirect = redirect
     self.multiViewer = multiViewer
+
     self._loadCase(self.currentIdx)
+
+    # Observe the EndCloseEvent (needed to set the current case to None)
+    self.node_removed_observer = slicer.mrmlScene.AddObserver(slicer.mrmlScene.NodeRemovedEvent, self.onNodeRemoved)
 
   def __del__(self):
     # Free up the references to the nodes to allow GC and prevent memory leaks
     self.logger.debug('Destroying Case Iterator Logic instance')
+    slicer.mrmlScene.RemoveObserver(self.node_removed_observer)
     self.currentCase = None
     self.iterator.cleanupIterator()
     self.iterator = None
@@ -509,15 +514,15 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     _, mask, _, additionalMasks = self.currentCase
     if self.saveLoaded:
       if mask is not None:
-        self.iterator.saveMask(mask,)
+        self.iterator.saveMask(mask, self.iterator.overwrite)
         self.iterator.backend.remove_mask_node_observers()
       for ma in additionalMasks:
-        self.iterator.saveMask(ma)
+        self.iterator.saveMask(ma, self.iterator.overwrite)
     if self.saveNew:
       nodes = [n for n in self.iterator.backend.getMaskNodes()
                if n not in additionalMasks and n != mask]
       for n in nodes:
-        self.iterator.saveMask(n)
+        self.iterator.saveMask(n, self.iterator.overwrite)
 
     # Remove reference to current case, signalling it is closed
     self.currentCase = None
@@ -535,3 +540,25 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       self.logger.debug("Removing segmentation nodes from current scene")
       for n in self.iterator.backend.getMaskNodes():
         slicer.mrmlScene.RemoveNode(n)
+
+  def onNodeRemoved(self, caller, event):
+    self.logger.debug('Node removed')
+    if self.currentCase is None:
+      return
+    nodes = slicer.mrmlScene.GetNodes()
+
+    if self.currentCase[0] is not None and not nodes.IsItemPresent(self.currentCase[0]):
+      self.logger.info('Main Image Node removed')
+      self.currentCase = (None, *self.currentCase[1:])
+    elif self.currentCase[1] is not None and not nodes.IsItemPresent(self.currentCase[1]):
+      self.logger.info('Main Mask Node removed')
+      self.currentCase = (self.currentCase[0], None, *self.currentCase[2:])
+    else:
+      for i in range(len(self.currentCase[2]) - 1, 0, -1):
+        if not nodes.IsItemPresent(self.currentCase[0][i]):
+          self.logger.info('Additional Image Node removed')
+          del self.currentCase[2][i]
+      for i in range(len(self.currentCase[3]) - 1, 0, -1):
+        if not nodes.IsItemPresent(self.currentCase[0][i]):
+          self.logger.info('Additional Mask Node removed')
+          del self.currentCase[3][i]
