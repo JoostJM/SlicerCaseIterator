@@ -351,19 +351,20 @@ class CaseTableIteratorLogic(IteratorBase.IteratorLogicBase):
 
   def closeCase(self):
     self._eventListeners.caseAboutToClose(self.parameterNode)
-    caseData = ast.literal_eval(self.parameterNode.GetParameter("CaseData"))
+    if self.parameterNode and self.parameterNode.GetParameter('CaseData') != '':
+      caseData = ast.literal_eval(self.parameterNode.GetParameter("CaseData"))
 
-    self.removeNodeByID(caseData["InputImage_ID"])
-    self.removeNodeByID(caseData["InputMask_ID"])
-    deque(map(self.removeNodeByID, caseData["Additional_InputImage_IDs"]))
-    deque(map(self.removeNodeByID, caseData["Additional_InputMask_IDs"]))
+      self.removeNodeByID(caseData["InputImage_ID"])
+      self.removeNodeByID(caseData["InputMask_ID"])
+      deque(map(self.removeNodeByID, caseData["Additional_InputImage_IDs"]))
+      deque(map(self.removeNodeByID, caseData["Additional_InputMask_IDs"]))
     self.currentIdx = None
 
   def getCaseData(self):
     """
     :return: image node, mask node, additional image nodes, additional mask nodes
     """
-    if self.parameterNode:
+    if self.parameterNode and self.parameterNode.GetParameter('CaseData') != '':
       caseData = eval(self.parameterNode.GetParameter("CaseData"))
       im = slicer.mrmlScene.GetNodeByID(caseData["InputImage_ID"])
       ma = slicer.mrmlScene.GetNodeByID(caseData["InputMask_ID"])
