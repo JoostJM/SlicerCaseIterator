@@ -12,18 +12,43 @@
 # ========================================================================
 
 import datetime
+import logging
 import os
 import tempfile
 import re
 
 import numpy as np
 
+try:
+  import pandas as pd
+except ImportError:
+  logger = logging.getLogger('SlicerCaseIterator')
+  logger.warning('pandas package is not yet installed, installing now... '
+                 '(This may take some time and appear to freeze slicer)')
+  from pip._internal.cli.main import main as _main
+  _main(['install', 'pandas'])
+
+  import pandas as pd
+
 import qt, ctk, slicer
 import MRMLCorePython
 
-import xnat
-from xnat_nki import cohort, io_mixin, segmentation_cohort
-from xnat_nki.io_mixin import slicer_mixin
+try:
+  import xnat
+  from xnat_nki import cohort, io_mixin, segmentation_cohort
+  from xnat_nki.io_mixin import slicer_mixin
+except ImportError:
+  logger = logging.getLogger('SlicerCaseIterator')
+  logger.warning('Xnat_NKI package is not yet installed, installing now... '
+                 '(This may take some time and appear to freeze slicer)')
+  from pip._internal.cli.main import main as _main
+  _main(['install', '//nki.nl/res/RD CRC-data/active_Joost/Python/XNAT/xnat_nki'])
+
+  import xnat
+  from xnat_nki import cohort, io_mixin, segmentation_cohort
+  from xnat_nki.io_mixin import slicer_mixin
+
+from .utils import xnat_connection
 
 from . import IteratorBase, SegmentationBackend
 
@@ -45,6 +70,8 @@ class XnatIteratorWidget(IteratorBase.IteratorWidgetBase):
     super().__init__(parent)
 
     self.session = None
+    self.xnat_logger = logging.getLogger('SlicerCaseIterator.Iterator.Xnat')
+    self.xnat_logger.setLevel(logging.INFO)
 
     self.current_project = None
     self.current_cohort: Optional[segmentation_cohort.SegmentationCohort] = None
@@ -52,6 +79,9 @@ class XnatIteratorWidget(IteratorBase.IteratorWidgetBase):
     # Widget attributes
     self.txt_xnatServer = None  # Txtbox
     self.btn_connectXnat = None
+
+    self.allowed_projects = None
+    self.disabled_projects = None
 
     self.cohortConfigCollapsibleButton = None
     self.projectSelector = None  # Combobox
@@ -117,7 +147,7 @@ class XnatIteratorWidget(IteratorBase.IteratorWidgetBase):
     }
 
     if self.projectSelector.currentText is not None:
-      user_prefs['project']= self.projectSelector.currentText
+      user_prefs['project'] = self.projectSelector.currentText
     if self.cohortSelector.currentText is not None:
       user_prefs['cohort'] = self.cohortSelector.currentText
     if self.sourceReaderName.currentText is not None:
@@ -224,7 +254,7 @@ class XnatIteratorWidget(IteratorBase.IteratorWidgetBase):
         self.logger.error('Need to set the server address first!')
         return
       try:
-        self.session = xnat.connect(self.txt_xnatServer.text)
+        self.session = xnat_connection.connect(self.txt_xnatServer.text)
       except Exception:
         self.logger.error('Error connecting to Xnat server', exc_info=True)
         return
@@ -237,9 +267,18 @@ class XnatIteratorWidget(IteratorBase.IteratorWidgetBase):
 
   # ------------------------------------------------------------------------------
   def loadProjects(self):
+    xnat_connection.refresh_connection(self.session)
+
+    allowed_projects = self.session.get_json("/data/projects", query={"owner": "true"})
+    self.allowed_projects = [p['id'] for p in allowed_projects['ResultSet']['Result']]
+    self.disabled_projects = []
+
     self.projectSelector.setCurrentIndex(-1)
     self.projectSelector.clear()
     for p in self.session.projects:
+      if p not in self.allowed_projects:
+        self.disabled_projects.append(p)
+        continue
       self.projectSelector.addItem(p)
 
   def onProjectChanged(self, index=None):
@@ -248,6 +287,8 @@ class XnatIteratorWidget(IteratorBase.IteratorWidgetBase):
 
   # ------------------------------------------------------------------------------
   def loadCohorts(self):
+    xnat_connection.refresh_connection(self.session)
+
     self.cohortSelector.setCurrentIndex(-1)
     self.cohortSelector.clear()
     if self.projectSelector.currentIndex == -1:
@@ -266,6 +307,8 @@ class XnatIteratorWidget(IteratorBase.IteratorWidgetBase):
 
   # ------------------------------------------------------------------------------
   def loadCohort(self):
+    xnat_connection.refresh_connection(self.session)
+
     self.sourceReaderName.setCurrentIndex(-1)
     self.sourceReaderName.clear()
     self.readerList.clear()
@@ -341,10 +384,11 @@ class XnatIteratorWidget(IteratorBase.IteratorWidgetBase):
     cohortMask = False
     reviewReader = None
 
-    if self.sourceReaderName.currentIndex == 1:
-      cohortMask = True
-    elif self.sourceReaderName.currentIndex > 1:
-      reviewReader = self.sourceReaderName.currentText
+    if self.sourceReaderName.currentIndex > 0:
+      if self.sourceReaderName.currentText == "Cohort_Masks":
+        cohortMask = True
+      else:
+        reviewReader = self.sourceReaderName.currentText
 
     return XnatIteratorLogic(
       self.current_cohort,
@@ -365,9 +409,17 @@ class XnatIteratorWidget(IteratorBase.IteratorWidgetBase):
 
 class XnatIteratorLogic(IteratorBase.IteratorLogicBase):
 
-  td_pattern = re.compile(r'(?P<neg>-)?(?P<days>\d+) days?, (?P<hours>\d+):(?P<minutes>\d+):(?P<seconds>\d+)(\.(?P<microseconds>\d+))?')
+  td_pattern = re.compile(r'(?P<neg>-)?((?P<days>\d+) days?, )?(?P<hours>\d+):(?P<minutes>\d+):(?P<seconds>\d+)(\.(?P<microseconds>\d+))?')
 
-  def __init__(self, cohort: segmentation_cohort.SegmentationCohort, reader: str, cohort_mask: bool, review_reader: Optional[str], overwrite: bool = False, update_timedelta=False):
+  def __init__(
+    self,
+    cohort: segmentation_cohort.SegmentationCohort,
+    reader: str,
+    cohort_mask: bool,
+    review_reader: Optional[str],
+    overwrite: bool = False,
+    update_timedelta=False
+  ):
     super().__init__(reader,
                      SegmentationBackend.SegmentEditorBackend(),
                      overwrite)
@@ -409,7 +461,7 @@ class XnatIteratorLogic(IteratorBase.IteratorLogicBase):
     else:
       grps = m.groupdict()
       return datetime.timedelta(
-        days=int(grps['days']) ,
+        days=int(grps['days']) if grps['days'] is not None else 0,
         hours=int(grps['hours']),
         minutes=int(grps['minutes']),
         seconds=int(grps['seconds']),
@@ -421,14 +473,14 @@ class XnatIteratorLogic(IteratorBase.IteratorLogicBase):
     if time_clm not in self.cohort.segmentation_records.columns:
       return datetime.timedelta()
     td = self.cohort.segmentation_records[time_clm].get(self.currentCase)
-    if td is None:
+    if pd.isnull(td):
       return datetime.timedelta()
     elif isinstance(td, datetime.timedelta):
       return td
     elif isinstance(td, str):
       return self._convert_to_timedelta(td)
     else:
-      self.logger.warning('Unexpected type for timing column: %s', type(td).__name__)
+      self.logger.warning('Unexpected type for timing column: %s, values %s', type(td).__name__, td)
       return datetime.timedelta()
 
   # ------------------------------------------------------------------------------
@@ -439,28 +491,34 @@ class XnatIteratorLogic(IteratorBase.IteratorLogicBase):
 
     self.logger.info('\nLoading case %s (%i/%i)...', self.currentCase, case_idx + 1, self.caseCount)
 
-    self.im_nodes = self.cohort.get_images(self.currentCase)
+    xnat_connection.refresh_connection(self.cohort.project.xnat_session)
+
+    self.im_nodes = self.cohort.get_images(self.currentCase, verbose=False)
     assert self.im_nodes[0] is not None, 'Failed to load primary image for case %s (%i/%i)' % (self.currentCase, case_idx + 1, self.caseCount)
 
-    self.ma_node = self.cohort.get_segmentation(self.currentCase, self.reader)
+    add_ims = [im for im in self.im_nodes[1:] if im is not None]
+
+    self.ma_node = self.cohort.get_segmentation(self.currentCase, self.reader, verbose=False)
     if self.ma_node is None:
       if self.cohort_mask:
         self.logger.info('Attempting to load Cohort Mask')
-        self.ma_node = self.cohort.get_mask(self.currentCase)
+        self.ma_node = self.cohort.get_mask(self.currentCase, verbose=False)
       elif self.review_reader is not None:
         self.logger.info('Attempting to load Mask for reader %s' % self.review_reader)
-        self.ma_node = self.cohort.get_segmentation(self.currentCase, self.review_reader)
+        self.ma_node = self.cohort.get_segmentation(self.currentCase, self.review_reader, verbose=False)
     else:
       self.logger.info('Reloaded the mask for reader %s', self.reader)
 
     if self.ma_node is None:  # ma is None, or loading failed...
       self.ma_node = self.backend.newMask(self.im_nodes[0], self.reader)
+    else:
+      self.backend.enforceGeometry(self.im_nodes[0], self.ma_node)
 
     # Mark the start of reading for this case
     self.time_start = datetime.datetime.now()
     self.time_delta = datetime.timedelta(0)
 
-    return self.im_nodes[0], self.ma_node, self.im_nodes[1:], []
+    return self.im_nodes[0], self.ma_node, add_ims, []
 
   # ------------------------------------------------------------------------------
   def onEndClose(self, caller, event):
@@ -481,6 +539,8 @@ class XnatIteratorLogic(IteratorBase.IteratorLogicBase):
       ext = 'nrrd'
 
     self.logger.info('Saving mask')
+
+    xnat_connection.refresh_connection(self.cohort.project.xnat_session)
 
     measurements = {}
     if self.time_start is not None:
