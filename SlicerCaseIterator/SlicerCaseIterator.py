@@ -90,6 +90,16 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       if 'multi_viewer' in user_prefs['main']:
         self.chkLayout.checked = user_prefs['main']['multi_viewer'] == 'True'
 
+      self.chkBlinded.checked = user_prefs['main'].get('blinded', 'False') == 'True'
+
+      if 'auto_redirect' in user_prefs['main']:
+        self.chkAutoRedirect.checked = user_prefs['main']['auto_redirect'] == 'True'
+      if 'save_masks' in user_prefs['main']:
+        self.chkSaveMasks.checked = user_prefs['main']['save_masks'] == 'True'
+      if 'save_new_masks' in user_prefs['main']:
+        self.chkSaveNewMasks.checked = user_prefs['main']['save_new_masks'] == 'True'
+      
+
     for iterator in self.inputWidgets.values():
       if iterator.__module__ in user_prefs:
         iterator.setUserPreferences(user_prefs[iterator.__module__])
@@ -99,7 +109,11 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       'main': {
         'reader_name': self.txtReaderName.text,
         'selected_iterator': self.inputSelector.currentText,
-        'multi_viewer': self.chkLayout.checked
+        'multi_viewer': self.chkLayout.checked,
+        'blinded': self.chkBlinded.checked,
+        'auto_redirect': self.chkAutoRedirect.checked,
+        'save_masks': self.chkSaveMasks.checked,
+        'save_new_masks': self.chkSaveNewMasks.checked
       }
     }
 
@@ -233,6 +247,15 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow('Mult-viewer', self.chkLayout)
 
     #
+    # Blinded review
+    #
+
+    self.chkBlinded = qt.QCheckBox()
+    self.chkBlinded.checked = 0
+    self.chkBlinded.toolTip = 'If checked, no patient or series information is shown'
+    parametersFormLayout.addRow('Blinded', self.chkBlinded)
+
+    #
     # Previous Case
     #
 
@@ -301,7 +324,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
                                              self.chkAutoRedirect.checked == 1,
                                              saveNew=(self.chkSaveNewMasks.checked == 1),
                                              saveLoaded=(self.chkSaveMasks.checked == 1),
-                                             multiViewer=(self.chkLayout.checked == 1))
+                                             multiViewer=(self.chkLayout.checked == 1),
+                                             blinded=(self.chkBlinded.checked == 1))
         self._setGUIstate()
       except Exception as e:
         self.logger.error('Error loading batch! %s', e)
@@ -428,7 +452,7 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
 
-  def __init__(self, iterator, start, redirect, saveNew=False, saveLoaded=False, multiViewer=False):
+  def __init__(self, iterator, start, redirect, **kwargs):
     super().__init__()
     self.logger = logging.getLogger('SlicerCaseIterator.logic')
 
@@ -440,16 +464,18 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     self.currentIdx = start - 1  # Current case index (starts at 0 for fist case, -1 means nothing loaded)
 
     # Some variables that control the output (formatting and control of discarding/saving
-    self.saveNew = saveNew
-    self.saveLoaded = saveLoaded
+    self.saveNew = kwargs.get('saveNew', False)
+    self.saveLoaded = kwargs.get('saveLoaded', False)
 
     # Variables to hold references to loaded image and mask nodes
     self.currentCase = None
+    self.mask_names = {}
 
     self.layoutLogic = LayoutLogic.CaseIteratorLayoutLogic()
 
     self.redirect = redirect
-    self.multiViewer = multiViewer
+    self.multiViewer = kwargs.get('multiViewer', False)
+    self.blinded = kwargs.get('blinded', False)
 
     self._loadCase(self.currentIdx)
 
@@ -494,6 +520,20 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       self.currentCase = self.iterator.loadCase(new_idx)
       im, ma, add_im, add_ma = self.currentCase
 
+      if self.blinded:
+        im.SetName('Main Image')
+        for idx, a_im in enumerate(add_im, start=1):
+          a_im.SetName('Additional Image %i' % idx)
+
+        self.mask_names = {}
+
+        if ma is not None:
+          self.mask_names[ma.GetID()] = ma.GetName()
+          ma.SetName('Main Mask')
+        for idx, a_ma in enumerate(add_ma, start=1):
+          self.mask_names[a_ma.GetID()] = a_ma.GetName()
+          a_ma.SetName('Additional Mask %i' % idx)
+
       if self.redirect:
         self.iterator.backend.enter_module(im, ma)
         self.iterator.backend.observe_mask_node(ma)
@@ -514,8 +554,14 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     _, mask, _, additionalMasks = self.currentCase
     if self.saveLoaded:
       if mask is not None:
+        if self.blinded:
+          mask.SetName(self.mask_names.get(mask.GetID(), mask.GetName()))
         self.iterator.saveMask(mask, self.iterator.overwrite)
         self.iterator.backend.remove_mask_node_observers()
+
+      if self.blinded:
+        for ma in additionalMasks:
+          ma.SetName(self.mask_names.get(ma.GetID(), ma.GetName()))
       for ma in additionalMasks:
         self.iterator.saveMask(ma, self.iterator.overwrite)
     if self.saveNew:
@@ -555,10 +601,10 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
       self.currentCase = (self.currentCase[0], None, *self.currentCase[2:])
     else:
       for i in range(len(self.currentCase[2]) - 1, 0, -1):
-        if not nodes.IsItemPresent(self.currentCase[0][i]):
+        if not nodes.IsItemPresent(self.currentCase[2][i]):
           self.logger.info('Additional Image Node removed')
           del self.currentCase[2][i]
       for i in range(len(self.currentCase[3]) - 1, 0, -1):
-        if not nodes.IsItemPresent(self.currentCase[0][i]):
+        if not nodes.IsItemPresent(self.currentCase[3][i]):
           self.logger.info('Additional Mask Node removed')
           del self.currentCase[3][i]
