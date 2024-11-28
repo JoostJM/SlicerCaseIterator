@@ -87,3 +87,11 @@ with open('/tmp/chd.csv', 'w') as fp:
         fp.write("%s,%s,%s\n" % (pathFormat % patIndex, imageFormat % patIndex, maskFormat % patIndex))
 
 ```
+Or, if you have two directories one with original images and one with segmentations that have the same filenames you could do something like this in a shell script.
+```bash
+IMAGEPATH=/data/images
+LABELPATH=/data/labels
+echo path,image,mask > cases.csv
+for image in ${IMAGEPATH}/*.nrrd ; do echo ${IMAGEPATH},$(basename ${image}),${LABELPATH}/$(basename ${image}) >> cases.csv ; done
+
+```
