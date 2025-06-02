@@ -1,5 +1,6 @@
 from . import CsvTableIterator
 from . import CsvInferenceIterator
+from . import TotalSegmentatorIterator
 from . import IteratorBase
 from functools import wraps
 import logging
@@ -20,7 +21,8 @@ class IteratorFactory(object):
 
   IMPLEMENTATIONS = {
     "simple_csv_iteration": CsvTableIterator.CaseTableIteratorWidget,
-    "mask_comparison": CsvInferenceIterator.CsvInferenceIteratorWidget
+    "mask_comparison": CsvInferenceIterator.CsvInferenceIteratorWidget,
+    "total_segmentator": TotalSegmentatorIterator.TotalSegmentatorIteratorWidget
   }
 
   @classmethod
@@ -36,7 +38,7 @@ class IteratorFactory(object):
   @staticmethod
   def reloadSourceFiles():
     packageName='SlicerCaseIteratorLib'
-    submoduleNames=['IteratorBase', 'CsvTableIterator', 'CsvInferenceIterator', 'IteratorFactory']
+    submoduleNames=['IteratorBase', 'CsvTableIterator', 'CsvInferenceIterator', 'TotalSegmentatorIterator', 'IteratorFactory']
     import imp
     f, filename, description = imp.find_module(packageName)
     package = imp.load_module(packageName, f, filename, description)

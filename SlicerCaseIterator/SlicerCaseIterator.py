@@ -283,21 +283,18 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self._unlockGUI(False)
 
       try:
-        reader = self.txtReaderName.text
-        if reader == '':
-          reader = None
-        iterator = self.inputWidget.startBatch(reader)
-        self.logic = SlicerCaseIteratorLogic(iterator,
-                                             self.npStart.value)
-        self.logic.start()
-        self.updateSegmentationProperties()
-        self._setGUIstate()
-        self._unlockGUI(True)
+        with slicer.util.tryWithErrorDisplay('Starting batch...'):
+          reader = self.txtReaderName.text
+          if reader == '':
+            reader = None
+          iterator = self.inputWidget.startBatch(reader)
+          self.logic = SlicerCaseIteratorLogic(iterator,
+                                              self.npStart.value)
+          self.logic.start()
+          self.updateSegmentationProperties()
+          self._setGUIstate()
+          self._unlockGUI(True)
       except Exception as e:
-        if slicer.app.majorVersion * 100 + slicer.app.minorVersion < 411:
-          e = e.message
-        self.logger.error('Error loading batch! %s', e)
-        self.logger.debug('', exc_info=True)
         self._setGUIstate(csv_loaded=False)
 
     else:
@@ -310,28 +307,30 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
   def onPrevious(self):
     # Lock GUI during loading
     self._unlockGUI(False)
-
-    self.logic.previousCase()
-    self.progressBar.value = self.logic.currentIdx+1
-    self.updateSegmentationProperties()
-
-    # Unlock GUI
-    self._unlockGUI(True)
+    try:
+      with slicer.util.tryWithErrorDisplay('Loading previous case...'):
+        self.logic.previousCase()
+        self.updateSegmentationProperties()
+    finally:
+      # Unlock GUI
+      self.progressBar.value = self.logic.currentIdx + 1
+      self._unlockGUI(True)
 
   #------------------------------------------------------------------------------
   def onNext(self):
     # Lock GUI during loading
     self._unlockGUI(False)
-
-    if self.logic.nextCase():
-      # Last case processed, reset GUI
-      self.onReset()
-    else:
-      self.progressBar.value = self.logic.currentIdx+1
-      self.updateSegmentationProperties()
-
-    # Unlock GUI
-    self._unlockGUI(True)
+    try:
+      with slicer.util.tryWithErrorDisplay('Loading next case...'):
+        if self.logic.nextCase():
+          # Last case processed, reset GUI
+          self.onReset()
+        else:
+          self.updateSegmentationProperties()
+    finally:
+      # Unlock GUI
+      self.progressBar.value = self.logic.currentIdx + 1
+      self._unlockGUI(True)
 
   # ------------------------------------------------------------------------------
   def _unlockGUI(self, unlocked):
