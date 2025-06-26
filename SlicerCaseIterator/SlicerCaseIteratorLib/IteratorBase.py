@@ -11,15 +11,11 @@
 #  limitations under the License.
 # ========================================================================
 
-from abc import abstractmethod
-import csv
-import logging
-import os
-
 import slicer
+from abc import abstractmethod
+import logging
 
 from . import SegmentationBackend
-
 
 # ------------------------------------------------------------------------------
 # IteratorWidgetBase
@@ -40,6 +36,7 @@ class IteratorWidgetBase(object):
     self.parent = parent
     self.validationHandler = None
     self.layout = None
+    self._iterator = None
 
   def __del__(self):
     self.logger.debug('Destroying Iterator Widget')
@@ -71,9 +68,6 @@ class IteratorWidgetBase(object):
     """
     pass
 
-  def onEndClose(self):
-    pass
-
   def validate(self):
     if self.validationHandler is not None:
       self.validationHandler(self.is_valid())
@@ -87,20 +81,39 @@ class IteratorWidgetBase(object):
     return True
 
   @abstractmethod
-  def startBatch(self, reader):
+  def startBatch(self, reader=None):
     """
     Function to start the batch. In the derived class, this should store relevant nodes to keep track of important data
-    :param reader: String defining the reader who created/updated the segmentation, can be None
+    :param reader: person reading the batch
     :return: Instance of class, derived from IteratorBase
     """
 
+  @abstractmethod
   def cleanupBatch(self):
     """
     Function to cleanup after finishing or resetting a batch. Main objective is to remove non-needed references to
-    tracked nodes in the widgeet, thereby allowing their associated resources to be released and GC'ed.
+    tracked nodes in the widget, thereby allowing their associated resources to be released and GC'ed.
     :return: None
     """
-    pass
+
+
+# ------------------------------------------------------------------------------
+# CallbackList
+# ------------------------------------------------------------------------------
+
+class IteratorEventListenerList(list):
+
+  def __init__(self, iterator):
+    super(IteratorEventListenerList, self).__init__()
+    self._iterator = iterator
+
+  def caseLoaded(self, *args, **kwargs):
+    for eventListener in self:
+      eventListener.onCaseLoaded(self._iterator, *args, **kwargs)
+
+  def caseAboutToClose(self, *args, **kwargs):
+    for eventListener in self:
+      eventListener.onCaseAboutToClose(self._iterator, *args, **kwargs)
 
 
 # ------------------------------------------------------------------------------
@@ -114,24 +127,66 @@ class IteratorLogicBase(object):
 
   - caseCount: Integer specifying how many cases are present in the batch defined by this iterator
   - loadCase: Function to load a certain case, specified by the passed `case_idx`
+  - closeCase: Function called by the logic to close currently opened case
   - saveMask: Function to store a loaded or new mask.
 
   :param reader: name of the reader performing the segmentation
   :param backend: instance derived from SegmentationBackend.SegmentationBackendBase, that can handle loading a mask
   """
 
+  @property
+  def parameterNode(self):
+    node = self._findParameterNodeInScene()
+    if not node:
+      node = self._createParameterNode()
+    return node
+
+  @staticmethod
+  def removeNodeByID(nodeID, mrmlScene=slicer.mrmlScene):
+    node = mrmlScene.GetNodeByID(nodeID)
+    if node:
+      mrmlScene.RemoveNode(node)
+
   def __init__(self, reader, backend, overwrite=False):
     self.logger = logging.getLogger('SlicerCaseIterator.Iterator')
+    self.currentIdx = None
     self.caseCount = None
     self.reader = reader
     self.overwrite = overwrite
     assert isinstance(backend, SegmentationBackend.SegmentationBackendBase)
     self.backend = backend
+    self._eventListeners = IteratorEventListenerList(self)
 
-  # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
   def __del__(self):
-    self.logger.debug('Destroying Iterator Logic')
-    self.cleanupIterator()
+    self.logger.debug('Destroying Case Iterator Logic instance')
+    if self.currentIdx is not None:
+      self.closeCase()
+    self._eventListeners = []
+    slicer.mrmlScene.RemoveNode(self.parameterNode)
+
+  def _findParameterNodeInScene(self):
+    for i in range(slicer.mrmlScene.GetNumberOfNodesByClass("vtkMRMLScriptedModuleNode")):
+      n = slicer.mrmlScene.GetNthNodeByClass(i, "vtkMRMLScriptedModuleNode")
+      if n.GetModuleName() == "SlicerCaseIterator":
+        return n
+    return None
+
+  def _createParameterNode(self):
+    node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScriptedModuleNode")
+    node.SetSingletonTag("SlicerCaseIterator")
+    node.SetModuleName("SlicerCaseIterator")
+    return node
+
+  def registerEventListener(self, listener):
+    """ Registering a listener that can act upon event invocation. Implementations of IteratorLogicBase have to
+    call self._eventListeners.caseLoaded(parameterNode) or self._eventListeners.caseAboutToClose(parameterNode)
+
+    :param listener: any class providing methods `onCaseLoaded` and  `onAboutToCloseCase`
+    :return: None
+    """
+    if listener not in self._eventListeners:
+      self._eventListeners.append(listener)
 
   @abstractmethod
   def loadCase(self, case_idx):
@@ -151,6 +206,13 @@ class IteratorLogicBase(object):
     return True
 
   @abstractmethod
+  def closeCase(self):
+    """
+    Function called by the logic to close currently opened case
+    :return: None
+    """
+
+  @abstractmethod
   def saveMask(self, node, overwrite_existing=False):
     """
     Function to save the passed mask
@@ -158,6 +220,14 @@ class IteratorLogicBase(object):
     :param overwrite_existing: If set to True, existing files are overwritten, otherwise, unique filenames are generated
     :return: None
     """
+
+  @abstractmethod
+  def getCaseData(self):
+    """
+    Implementations for the iterator have to provide this method so e.g. event listeners can work with its loaded data
+    :return: some data
+    """
+
 
   def _save_node(self, node, root, overwrite_existing=False):
     ext = self.backend.getMaskExtension()
@@ -317,3 +387,20 @@ class TableIteratorLogicBase(IteratorLogicBase):
     self.tableNode = None
 
     self.batchTable = None
+
+
+class IteratorEventHandlerBase(object):
+  """ Base class for event based handlers that can listen to events of IteratorLogicBase implementations
+
+  """
+
+  def __init__(self):
+    self.logger = logging.getLogger(self.__class__.__name__)
+
+  @abstractmethod
+  def onCaseLoaded(self, caller, *args, **kwargs):
+    pass
+
+  @abstractmethod
+  def onCaseAboutToClose(self, caller, *args, **kwargs):
+    pass

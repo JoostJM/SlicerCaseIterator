@@ -12,13 +12,13 @@
 # ========================================================================
 
 import logging
-import os
 
-import vtk, qt, ctk, slicer
+import qt, ctk, slicer
+from collections import deque
 from slicer.ScriptedLoadableModule import *
 
-
-from SlicerCaseIteratorLib import get_iterators, IteratorBase, LayoutLogic
+from SlicerCaseIteratorLib import IteratorBase
+from SlicerCaseIteratorLib.IteratorFactory import IteratorFactory
 
 
 # ------------------------------------------------------------------------------
@@ -34,11 +34,14 @@ class SlicerCaseIterator(ScriptedLoadableModule):
     self.parent.title = 'Case Iterator'
     self.parent.categories = ['Utilities']
     self.parent.dependencies = []
-    self.parent.contributors = ["Joost van Griethuysen (AVL-NKI)"]
+    self.parent.contributors = ["Joost van Griethuysen (AVL-NKI), Christian Herz (CHOP)"]
     self.parent.helpText = """
-    This is a scripted loadable module to iterate over a batch of images (with/without prior segmentations) for segmentation or review.
+    This is a scripted loadable module to iterate over a batch of images (with/without prior segmentations) for 
+    segmentation or review.
     """
-    self.parent.acknowledgementText = "This work is covered by the 3-clause BSD License. No funding was received for this work."
+    self.parent.acknowledgementText = """
+    This work is covered by the 3-clause BSD License. No funding was received for this work.
+    """
 
 
 # ------------------------------------------------------------------------------
@@ -56,6 +59,7 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self.logger.debug('Error saving user preferences!', exc_info=True)
     self.logger.debug('Destroying Slicer Case Iterator Widget')
     self.logic = None
+    self.inputWidget = None
     self._disconnectHandlers()
 
     # Explicitly remove references to all widgets, so that the controls can be destroyed
@@ -117,8 +121,17 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
           fs.write('%s: %s\n' % (var, user_prefs[key][var]))
         fs.write('\n')
 
+  def onReload(self):
+    if hasattr(self, 'inputWidget'):
+      self.inputWidget = None
+
+    IteratorFactory.reloadSourceFiles()
+    ScriptedLoadableModuleWidget.onReload(self)
+
   def setup(self):
     ScriptedLoadableModuleWidget.setup(self)
+
+    self.setupViewSettingsArea()
 
     # Setup a logger for the extension log messages
     self.logger = logging.getLogger('SlicerCaseIterator')
@@ -133,9 +146,20 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Instantiate and connect widgets ...
 
     #
+    # ComboBox for mode selection
+    #
+    self.modeGroup = qt.QGroupBox("Mode Selection")
+    self.modeGroup.setLayout(qt.QFormLayout())
+    self.layout.addWidget(self.modeGroup)
+
+    modes = IteratorFactory.getImplementationNames()
+    self.modeComboBox = qt.QComboBox()
+    self.modeComboBox.addItems([""] + modes)
+    self.modeGroup.layout().addWidget(self.modeComboBox)
+
+    #
     # Select and Load input data section
     #
-
     self.inputDataCollapsibleButton = ctk.ctkCollapsibleButton()
     self.inputDataCollapsibleButton.text = 'Select and Load case data'
     self.layout.addWidget(self.inputDataCollapsibleButton)
@@ -173,11 +197,20 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     # Parameters Area
     #
     self.parametersCollapsibleButton = ctk.ctkCollapsibleButton()
-    self.parametersCollapsibleButton.text = 'Parameters'
+    self.parametersCollapsibleButton.text = 'Case iteration parameters'
     self.layout.addWidget(self.parametersCollapsibleButton)
 
     # Layout within the dummy collapsible button
     parametersFormLayout = qt.QFormLayout(self.parametersCollapsibleButton)
+
+    #
+    # Reader Name
+    #
+    self.txtReaderName = qt.QLineEdit()
+    self.txtReaderName.text = ''
+    self.txtReaderName.toolTip = 'Name of the current reader; if not empty, this name will be added to the filename ' \
+                                 'of saved masks'
+    parametersFormLayout.addRow('Reader name', self.txtReaderName)
 
     #
     # Start position
@@ -190,22 +223,49 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     parametersFormLayout.addRow('Start position', self.npStart)
 
     #
-    # Reader Name
+    # Visualization Properties
     #
-    self.txtReaderName = qt.QLineEdit()
-    self.txtReaderName.text = ''
-    self.txtReaderName.toolTip = 'Name of the current reader; if not empty, this name will be added to the filename ' \
-                                 'of saved masks'
-    parametersFormLayout.addRow('Reader name', self.txtReaderName)
+    self.visualizationPropertiesCollapsibleButton = ctk.ctkCollapsibleButton()
+    self.visualizationPropertiesCollapsibleButton.text = 'Visualization properties'
+    self.layout.addWidget(self.visualizationPropertiesCollapsibleButton)
+
+    visualizationPropertiesFormLayout = qt.QVBoxLayout(self.visualizationPropertiesCollapsibleButton)
+
+    #
+    # Mask Groupbox
+    #
+    self.maskGroup = qt.QGroupBox("Mask")
+    self.maskGroup.setLayout(qt.QFormLayout())
+    visualizationPropertiesFormLayout.addWidget(self.maskGroup)
+
+    self.sliceFill2DSlider = slicer.qMRMLSliderWidget()
+    self.sliceFill2DSlider.minimum = 0.0
+    self.sliceFill2DSlider.maximum = 1.0
+    self.sliceFill2DSlider.singleStep = 0.1
+    self.maskGroup.layout().addRow("Slice 2D fill:", self.sliceFill2DSlider)
+
+    self.sliceOutline2DSlider = slicer.qMRMLSliderWidget()
+    self.sliceOutline2DSlider.minimum = 0.0
+    self.sliceOutline2DSlider.maximum = 1.0
+    self.sliceOutline2DSlider.singleStep = 0.1
+    self.sliceOutline2DSlider.value = 1.0
+    self.maskGroup.layout().addRow("Slice 2D outline:", self.sliceOutline2DSlider)
 
     #
     # Auto-redirect to Segmentation Module
     #
-
     self.chkAutoRedirect = qt.QCheckBox()
     self.chkAutoRedirect.checked = 1
     self.chkAutoRedirect.toolTip = 'Automatically switch to segmentation module when each case is loaded'
     parametersFormLayout.addRow('Go to segmentation module', self.chkAutoRedirect)
+
+    #
+    # Progressbar
+    #
+    self.progressBar = qt.QProgressBar()
+    self.progressBar.setFormat("%v/%m")
+    self.progressBar.visible = False
+    self.layout.addWidget(self.progressBar)
 
     #
     # Save masks
@@ -215,9 +275,6 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.chkSaveMasks.toolTip = 'save all initially loaded masks when proceeding to next case'
     parametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
 
-    #
-    # Save masks
-    #
     self.chkSaveNewMasks = qt.QCheckBox()
     self.chkSaveNewMasks.checked = 1
     self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
@@ -230,16 +287,23 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.chkLayout.checked = 1
     self.chkLayout.toolTip = 'If checked, all loaded volumes are displayed in separate viewers, ' \
                              'otherwise a single viewer is shown'
-    parametersFormLayout.addRow('Mult-viewer', self.chkLayout)
+    parametersFormLayout.addRow('Multi-viewer', self.chkLayout)
+
+    #
+    # Case Button Row
+    #
+    self.caseButtonWidget = qt.QWidget()
+    self.caseButtonWidget.setLayout(qt.QHBoxLayout())
+    self.layout.addWidget(self.caseButtonWidget)
+
 
     #
     # Previous Case
     #
-
     self.previousButton = qt.QPushButton('Previous Case')
     self.previousButton.enabled = False
     self.previousButton.toolTip = '(Ctrl+P) Press this button to go to the previous case, previous new masks are not reloaded'
-    self.layout.addWidget(self.previousButton)
+    self.caseButtonWidget.layout().addWidget(self.previousButton)
 
     #
     # Load CSV / Next Case
@@ -247,28 +311,54 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.nextButton = qt.QPushButton('Next Case')
     self.nextButton.enabled = False
     self.nextButton.toolTip = '(Ctrl+N) Press this button to go to the next case'
-    self.layout.addWidget(self.nextButton)
+    self.caseButtonWidget.layout().addWidget(self.nextButton)
 
     #
-    # Reset
+    # Collapsible Button group for enabling only one at a time
     #
-    self.resetButton = qt.QPushButton('Start Batch')
-    self.resetButton.enabled = False
-    self.layout.addWidget(self.resetButton)
+    self.collapsibleButtonGroup = qt.QButtonGroup()
+    self.collapsibleButtonGroup.setExclusive(True)
+    self.collapsibleButtonGroup.addButton(self.inputDataCollapsibleButton)
+    self.collapsibleButtonGroup.addButton(self.parametersCollapsibleButton)
+    self.collapsibleButtonGroup.addButton(self.visualizationPropertiesCollapsibleButton)
 
     self.layout.addStretch(1)
 
     #
     # Connect buttons to functions
     #
-
+    self.modeComboBox.currentTextChanged.connect(self.onModeSelected)
     self.inputSelector.connect('currentIndexChanged(int)', self.onChangeInput)
     self.previousButton.connect('clicked(bool)', self.onPrevious)
     self.nextButton.connect('clicked(bool)', self.onNext)
     self.resetButton.connect('clicked(bool)', self.onReset)
+    self.sliceFill2DSlider.valueChanged.connect(self.updateSegmentationProperties)
+    self.sliceOutline2DSlider.valueChanged.connect(self.updateSegmentationProperties)
+
+    if len(modes) == 1:
+      self.modeComboBox.hide()
+      self.onModeSelected(modes[0])
 
     self._setGUIstate(csv_loaded=False)
     self._load_user_preferences()
+
+  def setupViewSettingsArea(self):
+    try:
+      from SlicerDevelopmentToolboxUtils.buttons import FourUpLayoutButton, FourUpTableViewLayoutButton, CrosshairButton
+      from SlicerDevelopmentToolboxUtils.mixins import ModuleWidgetMixin
+
+      self.fourUpSliceLayoutButton = FourUpLayoutButton()
+      self.fourUpSliceTableViewLayoutButton = FourUpTableViewLayoutButton()
+      self.crosshairButton = CrosshairButton()
+      self.crosshairButton.setSliceIntersectionEnabled(True)
+
+      hbox = ModuleWidgetMixin.createHLayout([self.fourUpSliceLayoutButton,
+                                              self.fourUpSliceTableViewLayoutButton, self.crosshairButton])
+      self.layout.addWidget(hbox)
+    except ModuleNotFoundError:
+      logging.info("Skipping (optional) view settings area: SlicerDevelopmentToolbox was not found which is required "
+                   "for setting up the view settings area.  Please Install SlicerDevelopmentToolbox from the extension "
+                   "manager if you want to make use of it.")
 
   # ------------------------------------------------------------------------------
   def enter(self):
@@ -281,8 +371,32 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self.currentInput.layout.visible = True
 
   # ------------------------------------------------------------------------------
+  def onModeSelected(self, mode):
+    # Setup the widget for CSV table input
+    self.inputWidget = IteratorFactory.getIteratorWidget(mode)()
+    self.inputWidget.validationHandler = self.onValidateInput
+
+    inputDataFormLayout = qt.QFormLayout(self.inputDataCollapsibleButton)
+    self.inputParametersGroupBox = self.inputWidget.setup()
+    inputDataFormLayout.addRow(self.inputParametersGroupBox)
+
+    self.modeGroup.hide()
+    self.inputDataCollapsibleButton.click()
+
+  # ------------------------------------------------------------------------------
   def onValidateInput(self, is_valid):
     self.resetButton.enabled = is_valid
+
+  # ------------------------------------------------------------------------------
+  def updateSegmentationProperties(self, value=None):
+    def update(segNode):
+      try:
+        segNode.GetDisplayNode().SetOpacity2DFill(self.sliceFill2DSlider.value)
+        segNode.GetDisplayNode().SetOpacity2DOutline(self.sliceOutline2DSlider.value)
+      except AttributeError:
+        pass
+
+    deque(map(update, slicer.util.getNodesByClass("vtkMRMLSegmentationNode")))
 
   # ------------------------------------------------------------------------------
   def onReset(self):
@@ -295,15 +409,23 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
         reader = self.txtReaderName.text
         if reader == '':
           reader = None
+        iterator = self.inputWidget.startBatch(reader)
         iterator = self.currentInput.startBatch(reader)
+        self.logic = SlicerCaseIteratorLogic(iterator,
+                                             self.npStart.value)
+        self.logic.start()
         self.logic = SlicerCaseIteratorLogic(iterator,
                                              self.npStart.value,
                                              self.chkAutoRedirect.checked == 1,
                                              saveNew=(self.chkSaveNewMasks.checked == 1),
                                              saveLoaded=(self.chkSaveMasks.checked == 1),
                                              multiViewer=(self.chkLayout.checked == 1))
+        self.updateSegmentationProperties()
         self._setGUIstate()
+        self._unlockGUI(True)
       except Exception as e:
+        if slicer.app.majorVersion * 100 + slicer.app.minorVersion < 411:
+          e = e.message
         self.logger.error('Error loading batch! %s', e)
         self.logger.debug('', exc_info=True)
         self._setGUIstate(csv_loaded=False)
@@ -320,6 +442,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     self._unlockGUI(False)
 
     self.logic.previousCase()
+    self.progressBar.value = self.logic.currentIdx+1
+    self.updateSegmentationProperties()
 
     # Unlock GUI
     self._unlockGUI(True)
@@ -332,6 +456,9 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     if self.logic.nextCase():
       # Last case processed, reset GUI
       self.onReset()
+    else:
+      self.progressBar.value = self.logic.currentIdx+1
+      self.updateSegmentationProperties()
 
     # Unlock GUI
     self._unlockGUI(True)
@@ -363,17 +490,23 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
       self.resetButton.enabled = True
       self.resetButton.text = 'Reset'
 
+      self.progressBar.value = 1
+      self.progressBar.maximum = self.logic.iterator.caseCount
       self._connectHandlers()
     else:
       # reset Button is locked when loading cases, ensure it is unlocked to load new batch
+      self.resetButton.enabled = hasattr(self, 'inputWidget') and self.inputWidget.is_valid()
       self.resetButton.enabled = self.currentInput.is_valid()
       self.resetButton.text = 'Start Batch'
 
       self._disconnectHandlers()
 
+    self.progressBar.visible = csv_loaded
     self.previousButton.enabled = csv_loaded
     self.nextButton.enabled = csv_loaded
 
+    if hasattr(self, 'inputParametersGroupBox'):
+      self.inputParametersGroupBox.enabled = not csv_loaded
     self.inputSelector.enabled = not csv_loaded
     self.currentInput.layout.enabled = not csv_loaded
 
@@ -395,12 +528,6 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
     else:
       self.logger.warning('Shortcuts already initialized!')
 
-    # Add an observer for the "MRML Scene End Close Event"
-    if len(self.observers) == 0:
-      self.observers.append(slicer.mrmlScene.AddObserver(slicer.mrmlScene.EndCloseEvent, self.onEndClose))
-    else:
-      self.logger.warning('Event observer already initialized!')
-
   # ------------------------------------------------------------------------------
   def _disconnectHandlers(self):
     # Remove the keyboard shortcut
@@ -419,10 +546,8 @@ class SlicerCaseIteratorWidget(ScriptedLoadableModuleWidget):
 # SlicerCaseIteratorLogic
 # ------------------------------------------------------------------------------
 class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
-  """This class should implement all the actual
-  computation done by your module.  The interface
-  should be such that other python code can import
-  this class and make use of the functionality without
+  """This class should implement all the actual computation done by your module. The interface
+  should be such that other python code can import this class and make use of the functionality without
   requiring an instance of the Widget.
   Uses ScriptedLoadableModuleLogic base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
@@ -451,8 +576,6 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     self.redirect = redirect
     self.multiViewer = multiViewer
 
-    self._loadCase(self.currentIdx)
-
     # Observe the EndCloseEvent (needed to set the current case to None)
     self.node_removed_observer = slicer.mrmlScene.AddObserver(slicer.mrmlScene.NodeRemovedEvent, self.onNodeRemoved)
 
@@ -463,6 +586,9 @@ class SlicerCaseIteratorLogic(ScriptedLoadableModuleLogic):
     self.currentCase = None
     self.iterator.cleanupIterator()
     self.iterator = None
+
+  def start(self):
+    self._loadCase(self.currentIdx)
 
   # ------------------------------------------------------------------------------
   def nextCase(self):

@@ -12,8 +12,9 @@
 # ========================================================================
 
 import os
-
-import vtk, qt, ctk, slicer
+import ast
+from collections import deque
+import qt, ctk, slicer
 
 from . import IteratorBase, SegmentationBackend
 
@@ -108,7 +109,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.addImsSelector = qt.QLineEdit()
     self.addImsSelector.text = ''
     self.addImsSelector.toolTip = 'Comma separated names of the columns specifying additional image files in input CSV'
-    inputParametersFormLayout.addRow('Additional images Column', self.addImsSelector)
+    inputParametersFormLayout.addRow('Additional images Column(s)', self.addImsSelector)
 
     #
     # Additional masks
@@ -116,14 +117,42 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     self.addMasksSelector = qt.QLineEdit()
     self.addMasksSelector.text = ''
     self.addMasksSelector.toolTip = 'Comma separated names of the columns specifying additional mask files in input CSV'
-    inputParametersFormLayout.addRow('Additional masks Column', self.addMasksSelector)
+    inputParametersFormLayout.addRow('Additional masks Column(s)', self.addMasksSelector)
 
     #
     # Connect Event Handlers
     #
-
     self.batchTableSelector.connect('nodeActivated(vtkMRMLNode*)', self.onChangeTable)
     self.imageSelector.connect('textEdited(QString)', self.onChangeImageColumn)
+
+    self.segmentationParametersGroupBox = qt.QGroupBox('Mask interaction parameters')
+    parametersFormLayout.addRow(self.segmentationParametersGroupBox)
+
+    segmentationParametersFormLayout = qt.QFormLayout(self.segmentationParametersGroupBox)
+
+    #
+    # Auto-redirect to SegmentEditor
+    #
+    self.chkAutoRedirect = qt.QCheckBox()
+    self.chkAutoRedirect.checked = False
+    self.chkAutoRedirect.toolTip = 'Automatically switch module to "SegmentEditor" when each case is loaded'
+    segmentationParametersFormLayout.addRow('Go to Segment Editor', self.chkAutoRedirect)
+
+    #
+    # Save masks
+    #
+    self.chkSaveMasks = qt.QCheckBox()
+    self.chkSaveMasks.checked = False
+    self.chkSaveMasks.toolTip = 'save all initially loaded masks when proceeding to next case'
+    segmentationParametersFormLayout.addRow('Save loaded masks', self.chkSaveMasks)
+
+    #
+    # Save new masks
+    #
+    self.chkSaveNewMasks = qt.QCheckBox()
+    self.chkSaveNewMasks.checked = True
+    self.chkSaveNewMasks.toolTip = 'save all newly generated masks when proceeding to next case'
+    segmentationParametersFormLayout.addRow('Save new masks', self.chkSaveNewMasks)
 
     return self.layout
 
@@ -151,7 +180,7 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
     return self.batchTableSelector.currentNodeID != '' and self.imageSelector.text != ''
 
   # ------------------------------------------------------------------------------
-  def startBatch(self, reader):
+  def startBatch(self, reader=None):
     """
     Function to start the batch. In the derived class, this should store relevant nodes to keep track of important data
     :return: instance of an Iterator class defining the dataset to iterate over, and function for loading/storing a case
@@ -161,12 +190,22 @@ class CaseTableIteratorWidget(IteratorBase.IteratorWidgetBase):
 
     columnMap = self._parseConfig()
 
-    return CaseTableIteratorLogic(reader, self.tableNode, columnMap)
+    self._iterator = CaseTableIteratorLogic(self.tableNode, columnMap)
+    self._iterator.registerEventListener(
+      CsvTableEventHandler(reader=reader,
+                           redirect=self.chkAutoRedirect.checked,
+                           saveNew=self.chkSaveNewMasks.checked,
+                           saveLoaded=self.chkSaveMasks.checked)
+    )
+    return self._iterator
 
   # ------------------------------------------------------------------------------
   def cleanupBatch(self):
+    if self._iterator:
+      self._iterator.closeCase()
     self.tableNode = None
     self.tableStorageNode = None
+    self._iterator = None
 
   # ------------------------------------------------------------------------------
   def onChangeTable(self):
@@ -246,10 +285,56 @@ class CaseTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
     self.resetGridShortCut = qt.QShortcut(slicer.util.mainWindow())
     self.resetGridShortCut.setKey(qt.QKeySequence('Alt+R'))
     self.resetGridShortCut.connect('activated()', self.onResetGrid)
+  # ------------------------------------------------------------------------------
+  def __del__(self):
+    super(CaseTableIteratorLogic, self).__del__()
+    self.logger.debug('Destroying CSV Table Iterator')
+    self.batchTable = None
+    self.caseColumns = None
+
+  # ------------------------------------------------------------------------------
+  def _getColumns(self, columnMap):
+    caseColumns = {}
+
+    # Declare temporary function to parse out the user config and get the correct columns from the batchTable
+    def getColumn(key):
+      col = None
+      if key in columnMap:
+        col = self.batchTable.GetColumnByName(columnMap[key])
+        assert col is not None, 'Unable to find column "%s" (key %s)' % (columnMap[key], key)
+      caseColumns[key] = col
+
+    def getListColumn(key):
+      col_list = []
+      if key in columnMap:
+        for c_key in columnMap[key]:
+          col = self.batchTable.GetColumnByName(c_key)
+          assert col is not None, 'Unable to find column "%s" (key %s)' % (c_key, key)
+          col_list.append(col)
+      caseColumns[key] = col_list
+
+    # Special case: Check if there is a column "patient" or "ID" (used for additional naming of the case during logging)
+    patientColumn = self.batchTable.GetColumnByName('patient')
+    if patientColumn is None:
+      patientColumn = self.batchTable.GetColumnByName('ID')
+    if patientColumn is not None:
+      caseColumns['patient'] = patientColumn
+
+    # Get the other configurable columns
+    getColumn('root')
+    getColumn('image')
+    getColumn('mask')
+    getListColumn('additionalImages')
+    getListColumn('additionalMasks')
+
+    return caseColumns
 
   # ------------------------------------------------------------------------------
   def loadCase(self, case_idx):
     assert 0 <= case_idx < self.caseCount, 'case_idx %d is out of range (n cases: %d)' % (case_idx, self.caseCount)
+
+    if self.currentIdx is not None:
+      self.closeCase()
 
     patient = self.getColumnValue(self.patient, case_idx)
     if patient is not None:
@@ -285,7 +370,41 @@ class CaseTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
       if add_ma_node is not None:
         additionalMaskNodes.append(add_ma_node)
 
-    return im_node, ma_node, additionalImageNodes, additionalMaskNodes
+    self.parameterNode.SetParameter("CaseData", {
+      "InputImage_ID": im_node.GetID(),
+      "InputMask_ID": ma_node.GetID(),
+      "Additional_InputImage_IDs": [node.GetID() for node in additionalImageNodes],
+      "Additional_InputMask_IDs": [node.GetID() for node in additionalMaskNodes],
+    }.__str__())
+
+    self.currentIdx = case_idx
+
+    self._eventListeners.caseLoaded(self.parameterNode)
+    return True
+
+  def closeCase(self):
+    self._eventListeners.caseAboutToClose(self.parameterNode)
+    caseData = ast.literal_eval(self.parameterNode.GetParameter("CaseData"))
+
+    self.removeNodeByID(caseData["InputImage_ID"])
+    self.removeNodeByID(caseData["InputMask_ID"])
+    deque(map(self.removeNodeByID, caseData["Additional_InputImage_IDs"]))
+    deque(map(self.removeNodeByID, caseData["Additional_InputMask_IDs"]))
+    self.currentIdx = None
+
+  def getCaseData(self):
+    """
+    :return: image node, mask node, additional image nodes, additional mask nodes
+    """
+    if self.parameterNode:
+      caseData = eval(self.parameterNode.GetParameter("CaseData"))
+      im = slicer.mrmlScene.GetNodeByID(caseData["InputImage_ID"])
+      ma = slicer.mrmlScene.GetNodeByID(caseData["InputMask_ID"])
+      add_im = list(map(slicer.mrmlScene.GetNodeByID, caseData["Additional_InputImage_IDs"]))
+      add_ma = list(map(slicer.mrmlScene.GetNodeByID, caseData["Additional_InputMask_IDs"]))
+      return im, ma, add_im, add_ma
+    else:
+      return [None] * 4
 
   #   # ------------------------------------------------------------------------------
   def _loadImageNode(self, root, fname):
@@ -298,6 +417,9 @@ class CaseTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
       return None
 
     im_node = slicer.util.loadVolume(im_path)
+    if not im_node:
+      self.logger.warning('Failed to load ' + im_path)
+      return None
 
     # Use the file basename as the name for the loaded volume
     im_node.SetName(os.path.splitext(os.path.basename(im_path))[0])
@@ -317,7 +439,7 @@ class CaseTableIteratorLogic(IteratorBase.TableIteratorLogicBase):
     for n in range(numLogics):
       l = sliceLogics.GetItemAsObject(n)
       l.SnapSliceOffsetToIJK()
-      
+
   # ------------------------------------------------------------------------------
   def cleanupIterator(self):
     super(CaseTableIteratorLogic, self).cleanupIterator()
